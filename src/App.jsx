@@ -1,3 +1,5 @@
+import { enablePushNotifications } from './lib/push';
+import { supabase } from './lib/supabase';
 export default function App() {
   return (
     <div className="min-h-screen bg-white text-slate-900 flex items-center justify-center p-6">
@@ -22,6 +24,21 @@ export default function App() {
           >
             Rejoindre une ligue (bientôt)
           </button>
+
+          <button
+  className="w-full rounded-xl bg-slate-900 text-white px-4 py-3 text-base font-semibold hover:bg-slate-800"
+  onClick={async () => {
+    try {
+      await enablePushNotifications();
+      alert('Notifications activées (subscription enregistrée).');
+    } catch (e) {
+      alert(`Erreur: ${e.message || e}`);
+    }
+  }}
+>
+  Activer les notifications
+</button>
+
         </div>
 
         <p className="mt-5 text-xs text-slate-500">
@@ -31,4 +48,3 @@ export default function App() {
     </div>
   );
 }
-
