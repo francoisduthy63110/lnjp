@@ -90,7 +90,11 @@ function Player() {
   const [loading, setLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
 
-  const unreadCount = useMemo(() => items.filter((i) => !i.readAt).length, [items]);
+  const unreadCount = useMemo(
+  () => items.filter((i) => !(i.readAt || i.read_at || i.read || i.isRead)).length,
+  [items]
+);
+
 
 async function loadInbox() {
   setLoading(true);
@@ -99,7 +103,7 @@ async function loadInbox() {
     const uid = getCurrentUserId();
     console.log("[Inbox] userId", uid);
 
-    const res = await fetch(`/api/inbox?userId=${encodeURIComponent(uid)}`);
+    const res = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}`);
     console.log("[Inbox] res", res.status);
 
     const data = await res.json();
