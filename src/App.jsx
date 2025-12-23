@@ -78,6 +78,10 @@ function Admin() {
             </pre>
           )}
         </div>
+
+        <p className="text-sm text-slate-600">
+          Astuce : ouvre <span className="font-mono">/admin</span> sur ton ordinateur.
+        </p>
       </div>
     </div>
   );
@@ -92,11 +96,8 @@ function Player() {
   const [loading, setLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
 
-  // ✅ CORRECTIF : test explicite sur NULL
-  const unreadCount = useMemo(
-    () => items.filter((i) => i.readAt === null).length,
-    [items]
-  );
+  // Non-lu = readAt strictement NULL (aligné DB)
+  const unreadCount = useMemo(() => items.filter((i) => i.readAt === null).length, [items]);
 
   async function loadInbox() {
     setLoading(true);
@@ -111,13 +112,13 @@ function Player() {
     }
   }
 
-  /* 1️⃣ Chargement initial */
+  // 1) Chargement initial
   useEffect(() => {
     loadInbox();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* 2️⃣ Auto-refresh quand une push arrive */
+  // 2) Auto-refresh quand la push arrive (message depuis SW)
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
@@ -132,6 +133,29 @@ function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // 3) Badge iOS / PWA (pastille sur l’icône) via Badging API si supportée
+  useEffect(() => {
+    const hasBadging =
+      typeof navigator !== "undefined" &&
+      "setAppBadge" in navigator &&
+      "clearAppBadge" in navigator;
+
+    if (!hasBadging) return;
+
+    (async () => {
+      try {
+        if (unreadCount > 0) {
+          // iOS attend un integer
+          await navigator.setAppBadge(unreadCount);
+        } else {
+          await navigator.clearAppBadge();
+        }
+      } catch {
+        // iOS peut refuser selon contexte; on ignore
+      }
+    })();
+  }, [unreadCount]);
+
   return (
     <div className="min-h-screen bg-white text-slate-900 p-6">
       <div className="max-w-xl mx-auto">
@@ -141,6 +165,7 @@ function Player() {
             <p className="mt-3 text-slate-600">V0+ — Push + Inbox minimale</p>
           </div>
 
+          {/* Compteur in-app */}
           <div className="text-sm text-slate-600 text-right">
             Inbox : <span className="font-semibold">{unreadCount}</span> non-lu
           </div>
@@ -178,54 +203,58 @@ function Player() {
             </div>
           )}
 
-          {items.map((n) => (
-            <div key={n.id} className="border rounded-xl p-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="font-semibold">{n.title}</div>
-                  <div className="text-sm text-slate-600 mt-1">{n.body}</div>
-                  <div className="text-xs text-slate-400 mt-2">
-                    {n.createdAt && new Date(n.createdAt).toLocaleString()}
+          {items.map((n) => {
+            const isUnread = n.readAt === null;
+
+            return (
+              <div key={n.id} className="border rounded-xl p-4">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="font-semibold">{n.title}</div>
+                    <div className="text-sm text-slate-600 mt-1">{n.body}</div>
+                    <div className="text-xs text-slate-400 mt-2">
+                      {n.createdAt ? new Date(n.createdAt).toLocaleString() : ""}
+                    </div>
                   </div>
+
+                  {isUnread && (
+                    <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
+                      Nouveau
+                    </span>
+                  )}
                 </div>
 
-                {/* ✅ CORRECTIF */}
-                {n.readAt === null && (
-                  <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
-                    Nouveau
-                  </span>
-                )}
-              </div>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {isUnread && (
+                    <button
+                      className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
+                      onClick={async () => {
+                        await fetch("/api/inbox-read", {
+                          method: "POST",
+                          headers: { "Content-Type": "application/json" },
+                          body: JSON.stringify({ userId, notificationId: n.id }),
+                        });
+                        loadInbox();
+                      }}
+                    >
+                      Marquer comme lu
+                    </button>
+                  )}
 
-              <div className="mt-3 flex gap-2">
-                {n.readAt === null && (
-                  <button
-                    className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                    onClick={async () => {
-                      await fetch("/api/inbox-read", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ userId, notificationId: n.id }),
-                      });
-                      loadInbox();
-                    }}
-                  >
-                    Marquer comme lu
-                  </button>
-                )}
-
-                {n.url && (
-                  <a
-                    className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                    href={n.url}
-                  >
-                    Ouvrir
-                  </a>
-                )}
+                  {n.url && (
+                    <a className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50" href={n.url}>
+                      Ouvrir
+                    </a>
+                  )}
+                </div>
               </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
+
+        <p className="mt-6 text-xs text-slate-500">
+          Objectif : Push “best effort” + Inbox comme filet de sécurité.
+        </p>
       </div>
     </div>
   );
