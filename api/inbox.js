@@ -8,6 +8,7 @@ function requireEnv(name) {
 
 export default async function handler(req, res) {
   try {
+    res.setHeader("Cache-Control", "no-store, max-age=0");
     if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
 
     const SUPABASE_URL = requireEnv("SUPABASE_URL");
@@ -33,7 +34,7 @@ export default async function handler(req, res) {
       createdAt: n.created_at,
       readAt: n.read_at,
     }));
-
+res.setHeader("Cache-Control", "no-store, max-age=0");
     return res.json({ ok: true, userId, items });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });
