@@ -178,7 +178,7 @@ async function loadInbox() {
                   </div>
                 </div>
 
-                {!n.readAt && (
+                {!(n.readAt || n.read_at || n.read || n.isRead) && (
                   <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
                     Nouveau
                   </span>
@@ -186,7 +186,7 @@ async function loadInbox() {
               </div>
 
               <div className="mt-3 flex flex-wrap gap-2">
-                {!n.readAt && (
+                {!(n.readAt || n.read_at || n.read || n.isRead) && (
                   <button
                     className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
 onClick={async () => {
