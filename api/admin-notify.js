@@ -31,10 +31,16 @@ export default async function handler(req, res) {
 
     // 4) Crée la notification (Inbox)
     const { data: notif, error: notifErr } = await supabase
-      .from("notifications")
-      .insert({ title, body, url: url || "/" })
-      .select()
-      .single();
+  .from("notifications")
+  .insert({
+    title,
+    body,
+    url: url || "/",
+    created_by: "super_admin"
+  })
+  .select()
+  .single();
+
 
     if (notifErr) return res.status(500).json({ error: notifErr.message });
 
