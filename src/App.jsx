@@ -1,341 +1,314 @@
 import { useEffect, useMemo, useState } from "react";
-import { enablePushNotifications } from "./lib/push";
-import { getCurrentUserId } from "./lib/user";
+import { supabase } from "./lib/supabase";
+import Admin from "./admin/Admin";
+import PlayerHome from "./components/PlayerHome";
 
-/* =========================
-   ADMIN
-========================= */
-function Admin() {
-  const [token, setToken] = useState("");
-  const [title, setTitle] = useState("LNJP");
-  const [body, setBody] = useState("Attention, pronostics à faire avant demain 19h.");
-  const [url, setUrl] = useState("/");
-  const [result, setResult] = useState(null);
-  const [sending, setSending] = useState(false);
+/**
+ * App.jsx (réécrit)
+ * - garde le routage simple comme avant: /admin => Admin, sinon Player
+ * - ajoute Auth OTP + pseudo (écran unique)
+ * - stocke user_id dans localStorage pour compat Notifications (qui consomment /api/inbox?userId=...)
+ */
+export default function App() {
+  const isAdminRoute = useMemo(() => window.location.pathname.startsWith("/admin"), []);
 
-  return (
-    <div className="min-h-screen bg-white text-slate-900 p-6">
-      <div className="max-w-xl mx-auto space-y-4">
-        <h1 className="text-3xl font-bold">Super Admin — Notifications</h1>
+  const [session, setSession] = useState(null);
+  const [profile, setProfile] = useState(null);
+  const [booting, setBooting] = useState(true);
+  const [bootError, setBootError] = useState("");
 
-        <div className="rounded-xl border p-4 space-y-3">
-          <input
-            className="w-full border rounded-lg p-2"
-            placeholder="ADMIN_TOKEN (MVP)"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
-          />
-          <input
-            className="w-full border rounded-lg p-2"
-            placeholder="Titre"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <textarea
-            className="w-full border rounded-lg p-2"
-            placeholder="Message"
-            value={body}
-            onChange={(e) => setBody(e.target.value)}
-          />
-          <input
-            className="w-full border rounded-lg p-2"
-            placeholder="URL (optionnel)"
-            value={url}
-            onChange={(e) => setUrl(e.target.value)}
-          />
-
-          <button
-            className="w-full rounded-xl bg-slate-900 text-white px-4 py-3 font-semibold hover:bg-slate-800 disabled:opacity-50"
-            disabled={sending}
-            onClick={async () => {
-              setResult(null);
-              setSending(true);
-              try {
-                const r = await fetch("/api/admin-notify", {
-                  method: "POST",
-                  headers: {
-                    "Content-Type": "application/json",
-                    Authorization: `Bearer ${token}`,
-                  },
-                  body: JSON.stringify({ title, body, url }),
-                });
-
-                const data = await r.json().catch(() => ({}));
-                setResult(data);
-              } catch (e) {
-                setResult({ error: e?.message || String(e) });
-              } finally {
-                setSending(false);
-              }
-            }}
-          >
-            {sending ? "Envoi..." : "Envoyer push + Inbox"}
-          </button>
-
-          {result && (
-            <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">
-              {JSON.stringify(result, null, 2)}
-            </pre>
-          )}
-        </div>
-
-        <p className="text-sm text-slate-600">
-          Astuce : ouvre <span className="font-mono">/admin</span> sur ton ordinateur.
-        </p>
-      </div>
-    </div>
-  );
-}
-
-/* =========================
-   PLAYER
-========================= */
-function Player() {
-  const userId = useMemo(() => getCurrentUserId(), []);
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [pushEnabled, setPushEnabled] = useState(false);
-
-  // Modale de lecture
-  const [openItem, setOpenItem] = useState(null);
-
-  // Non-lu = readAt strictement NULL (aligné DB)
-  const unreadCount = useMemo(() => items.filter((i) => i.readAt === null).length, [items]);
-
-  async function loadInbox() {
-    setLoading(true);
-    try {
-      const res = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}`);
-      const data = await res.json();
-      setItems(data.items || []);
-    } catch (e) {
-      console.error("[Inbox] loadInbox error", e);
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  // 1) Chargement initial
+  // Boot session + listener
   useEffect(() => {
-    loadInbox();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 2) Auto-refresh quand la push arrive (message depuis SW)
-  useEffect(() => {
-    if (!("serviceWorker" in navigator)) return;
-
-    const handler = (event) => {
-      if (event.data?.type === "INBOX_REFRESH") {
-        loadInbox();
-      }
-    };
-
-    navigator.serviceWorker.addEventListener("message", handler);
-    return () => navigator.serviceWorker.removeEventListener("message", handler);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // 3) Badge iOS / PWA (pastille sur l’icône) via Badging API si supportée
-  useEffect(() => {
-    const hasBadging =
-      typeof navigator !== "undefined" &&
-      "setAppBadge" in navigator &&
-      "clearAppBadge" in navigator;
-
-    if (!hasBadging) return;
+    let unsub = null;
 
     (async () => {
       try {
-        if (unreadCount > 0) {
-          await navigator.setAppBadge(unreadCount);
-        } else {
-          await navigator.clearAppBadge();
-        }
-      } catch {
-        // iOS peut refuser selon contexte; ignore
+        const { data, error } = await supabase.auth.getSession();
+        if (error) throw error;
+        setSession(data.session ?? null);
+      } catch (e) {
+        setBootError(e?.message ?? "Erreur session.");
       }
     })();
-  }, [unreadCount]);
 
-  // Action: Lire => ouvre la modale + marque lu (sans casser la chaîne)
-  async function readNotification(n) {
-    // 1) Ouvre la modale tout de suite
-    setOpenItem(n);
+    const { data } = supabase.auth.onAuthStateChange((_event, s) => {
+      setSession(s ?? null);
 
-    // 2) Si déjà lu, on ne refait rien
-    if (n.readAt !== null) return;
+      // Compat Notifications: on stocke l'UUID auth comme userId "technique"
+      const uid = s?.user?.id ?? "";
+      if (uid) localStorage.setItem("lnjp_user_id", uid);
+      else localStorage.removeItem("lnjp_user_id");
+    });
 
-    // 3) Optimiste: on marque lu côté UI immédiatement (badge baisse sans attendre)
-    const nowIso = new Date().toISOString();
-    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, readAt: nowIso } : x)));
+    unsub = data?.subscription;
 
-    // 4) Persist côté backend (sans impacter le reste)
-    try {
-      await fetch("/api/inbox-read", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId, notificationId: n.id }),
-      });
-    } catch (e) {
-      // Si erreur, on resynchronise (et on ne casse pas l’expérience)
-      console.error("[Inbox] inbox-read error", e);
-      await loadInbox();
+    return () => {
+      try {
+        unsub?.unsubscribe?.();
+      } catch {
+        // ignore
+      }
+    };
+  }, []);
+
+  // Load profile (profiles table) quand connecté
+  useEffect(() => {
+    if (!session) {
+      setProfile(null);
+      setBooting(false);
+      return;
     }
+
+    let alive = true;
+    (async () => {
+      setBooting(true);
+      setBootError("");
+      try {
+        const { data, error } = await supabase
+          .from("profiles")
+          .select("id, display_name, role")
+          .eq("id", session.user.id)
+          .maybeSingle();
+
+        if (error) throw error;
+
+        if (!alive) return;
+        setProfile(data ?? null);
+      } catch (e) {
+        if (!alive) return;
+        setBootError(e?.message ?? "Erreur chargement profil.");
+      } finally {
+        if (!alive) return;
+        setBooting(false);
+      }
+    })();
+
+    return () => {
+      alive = false;
+    };
+  }, [session]);
+
+  async function signOut() {
+    await supabase.auth.signOut();
   }
 
-  function closeModal() {
-    setOpenItem(null);
+  // Route Admin = écran dédié (comme avant)
+  if (isAdminRoute) {
+    return <Admin />;
   }
 
-  return (
-    <div className="min-h-screen bg-white text-slate-900 p-6">
-      <div className="max-w-xl mx-auto">
-        <div className="flex items-baseline justify-between gap-4">
-          <div>
-            <h1 className="text-5xl font-bold">LNJP</h1>
-            <p className="mt-3 text-slate-600">V0+ — Push + Inbox minimale</p>
-          </div>
+  // Non connecté => onboarding
+  if (!session) {
+    return <Onboarding />;
+  }
 
-          <div className="text-sm text-slate-600 text-right">
-            Inbox : <span className="font-semibold">{unreadCount}</span> non-lu
-          </div>
+  // Connecté mais profil pas prêt => écran safe
+  if (booting) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <div className="max-w-md mx-auto bg-white border rounded-2xl p-6">
+          <div className="text-sm text-slate-600">Chargement…</div>
         </div>
-
-        <div className="mt-6 grid gap-3">
-          <button
-            className="w-full rounded-xl bg-slate-900 text-white px-4 py-3 text-base font-semibold hover:bg-slate-800"
-            onClick={async () => {
-              try {
-                await enablePushNotifications();
-                setPushEnabled(true);
-                alert("Notifications activées.");
-              } catch (e) {
-                alert(`Erreur: ${e?.message || e}`);
-              }
-            }}
-          >
-            {pushEnabled ? "Notifications activées" : "Activer les notifications"}
-          </button>
-
-          <button
-            className="w-full rounded-xl border border-slate-200 bg-white px-4 py-3 text-base font-medium"
-            onClick={loadInbox}
-            disabled={loading}
-          >
-            {loading ? "Chargement..." : "Rafraîchir l’Inbox"}
-          </button>
-        </div>
-
-        <div className="mt-6 space-y-3">
-          {items.length === 0 && (
-            <div className="text-sm text-slate-500 border rounded-xl p-4">
-              Aucune notification pour l’instant.
-            </div>
-          )}
-
-          {items.map((n) => {
-            const isUnread = n.readAt === null;
-
-            return (
-              <div key={n.id} className="border rounded-xl p-4">
-                <div className="flex items-start justify-between gap-3">
-                  <div className="min-w-0">
-                    <div className="font-semibold truncate">{n.title}</div>
-                    <div className="text-sm text-slate-600 mt-1 line-clamp-2">{n.body}</div>
-                    <div className="text-xs text-slate-400 mt-2">
-                      {n.createdAt ? new Date(n.createdAt).toLocaleString() : ""}
-                    </div>
-                  </div>
-
-                  {isUnread && (
-                    <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
-                      Nouveau
-                    </span>
-                  )}
-                </div>
-
-                <div className="mt-3 flex flex-wrap gap-2">
-                  <button
-                    className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                    onClick={() => readNotification(n)}
-                  >
-                    Lire
-                  </button>
-
-                  {n.url && (
-                    <a className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50" href={n.url}>
-                      Ouvrir
-                    </a>
-                  )}
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        <p className="mt-6 text-xs text-slate-500">
-          Objectif : Push “best effort” + Inbox comme filet de sécurité.
-        </p>
       </div>
+    );
+  }
 
-      {/* =========================
-          MODALE "Lire"
-      ========================= */}
-      {openItem && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4"
-          role="dialog"
-          aria-modal="true"
-          onClick={closeModal}
-        >
-          <div className="absolute inset-0 bg-black/40" />
-
-          <div
-            className="relative w-full max-w-xl rounded-2xl bg-white shadow-xl border p-5"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <div className="text-lg font-bold">{openItem.title}</div>
-                <div className="text-xs text-slate-400 mt-1">
-                  {openItem.createdAt ? new Date(openItem.createdAt).toLocaleString() : ""}
-                </div>
-              </div>
-
-              <button
-                className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                onClick={closeModal}
-              >
-                Fermer
-              </button>
-            </div>
-
-            <div className="mt-4 text-sm text-slate-700 whitespace-pre-wrap">
-              {openItem.body}
-            </div>
-
-            {openItem.url && (
-              <div className="mt-4">
-                <a
-                  className="inline-flex text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                  href={openItem.url}
-                >
-                  Ouvrir le lien
-                </a>
-              </div>
-            )}
-          </div>
+  if (bootError) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <div className="max-w-md mx-auto bg-white border rounded-2xl p-6 space-y-3">
+          <div className="text-lg font-bold">Erreur</div>
+          <div className="text-sm text-red-600">{bootError}</div>
+          <button className="w-full rounded-xl bg-slate-900 text-white py-3 font-semibold" onClick={signOut}>
+            Se déconnecter
+          </button>
         </div>
-      )}
-    </div>
-  );
+      </div>
+    );
+  }
+
+  if (!profile) {
+    return (
+      <div className="min-h-screen bg-slate-50 p-6 text-slate-900">
+        <div className="max-w-md mx-auto bg-white border rounded-2xl p-6 space-y-3">
+          <div className="text-lg font-bold">Profil manquant</div>
+          <div className="text-sm text-slate-600">
+            Ton profil n’a pas été créé correctement. Déconnecte-toi puis reconnecte-toi.
+          </div>
+          <button className="w-full rounded-xl bg-slate-900 text-white py-3 font-semibold" onClick={signOut}>
+            Se déconnecter
+          </button>
+        </div>
+      </div>
+    );
+  }
+
+  return <PlayerHome profile={profile} onSignOut={signOut} />;
 }
 
 /* =========================
-   ROOT
+   ONBOARDING (1 écran)
+   - email + pseudo
+   - send OTP
+   - verify OTP
+   - upsert profiles (display_name)
 ========================= */
-export default function App() {
-  const isAdmin = window.location.pathname.startsWith("/admin");
-  return isAdmin ? <Admin /> : <Player />;
+
+function Onboarding() {
+  const [email, setEmail] = useState("");
+  const [pseudo, setPseudo] = useState("");
+  const [otpSent, setOtpSent] = useState(false);
+  const [otp, setOtp] = useState("");
+
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+
+  const canSend = useMemo(() => {
+    const e = email.trim();
+    const p = pseudo.trim();
+    return e.includes("@") && e.includes(".") && p.length >= 2;
+  }, [email, pseudo]);
+
+  async function sendOtp() {
+    setError("");
+    setBusy(true);
+    try {
+      const { error } = await supabase.auth.signInWithOtp({
+        email: email.trim(),
+        options: {
+          emailRedirectTo: window.location.origin,
+        },
+      });
+      if (error) throw error;
+      setOtpSent(true);
+    } catch (e) {
+      setError(e?.message ?? "Erreur lors de l’envoi du code.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function verify() {
+    setError("");
+    setBusy(true);
+    try {
+      const { data, error } = await supabase.auth.verifyOtp({
+        email: email.trim(),
+        token: otp.trim(),
+        type: "email",
+      });
+      if (error) throw error;
+
+      const uid = data?.user?.id;
+      if (!uid) throw new Error("Connexion impossible (user manquant).");
+
+      // Compat Notifications : stocke userId (UUID) immédiatement
+      localStorage.setItem("lnjp_user_id", uid);
+
+      // Upsert profil (pseudo)
+      const { error: pe } = await supabase.from("profiles").upsert(
+        {
+          id: uid,
+          display_name: pseudo.trim(),
+        },
+        { onConflict: "id" }
+      );
+      if (pe) throw pe;
+
+      // Rien d'autre: App remontera via onAuthStateChange
+    } catch (e) {
+      setError(e?.message ?? "Code invalide.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
+      <div className="w-full max-w-md bg-white border rounded-2xl shadow-sm p-6 space-y-4">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold">LNJP</h1>
+          <p className="text-sm text-slate-600">
+            Connexion rapide : e-mail + pseudo, puis code OTP.
+          </p>
+        </div>
+
+        <div className="space-y-3">
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Adresse e-mail</span>
+            <input
+              className="w-full border rounded-xl p-3"
+              value={email}
+              onChange={(e) => setEmail(e.target.value)}
+              placeholder="ex: prenom.nom@email.com"
+              autoComplete="email"
+              inputMode="email"
+              disabled={busy || otpSent}
+            />
+          </label>
+
+          <label className="block space-y-1">
+            <span className="text-sm font-medium">Pseudo</span>
+            <input
+              className="w-full border rounded-xl p-3"
+              value={pseudo}
+              onChange={(e) => setPseudo(e.target.value)}
+              placeholder="ex: JoyeuxParieur"
+              autoComplete="nickname"
+              disabled={busy || otpSent}
+            />
+          </label>
+
+          {!otpSent ? (
+            <button
+              className="w-full rounded-xl bg-slate-900 text-white py-3 font-semibold disabled:opacity-50"
+              onClick={sendOtp}
+              disabled={!canSend || busy}
+            >
+              {busy ? "Envoi..." : "Recevoir mon code"}
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <label className="block space-y-1">
+                <span className="text-sm font-medium">Code reçu (OTP)</span>
+                <input
+                  className="w-full border rounded-xl p-3 tracking-widest"
+                  value={otp}
+                  onChange={(e) => setOtp(e.target.value)}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  disabled={busy}
+                />
+              </label>
+
+              <button
+                className="w-full rounded-xl bg-slate-900 text-white py-3 font-semibold disabled:opacity-50"
+                onClick={verify}
+                disabled={otp.trim().length < 4 || busy}
+              >
+                {busy ? "Validation..." : "Valider et entrer"}
+              </button>
+
+              <button
+                className="w-full rounded-xl border py-3 font-semibold"
+                onClick={() => {
+                  setOtpSent(false);
+                  setOtp("");
+                }}
+                disabled={busy}
+              >
+                Revenir en arrière
+              </button>
+            </div>
+          )}
+        </div>
+
+        {error ? <div className="text-sm text-red-600">{error}</div> : null}
+
+        <div className="text-xs text-slate-500 leading-relaxed">
+          MVP : pseudo unique globalement (contrainte DB recommandée). Pas de changement de pseudo pour l’instant.
+        </div>
+      </div>
+    </div>
+  );
 }
