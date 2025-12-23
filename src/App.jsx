@@ -92,30 +92,29 @@ function Player() {
 
   const unreadCount = useMemo(() => items.filter((i) => !i.readAt).length, [items]);
 
-  async function loadInbox() {
-    setLoading(true);
-    try {
-      const r = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}`, {
-        cache: "no-store",
-      });
+async function loadInbox() {
+  setLoading(true);
+  try {
+    console.log("[Inbox] loadInbox start");
+    const uid = getCurrentUserId();
+    console.log("[Inbox] userId", uid);
 
-      const data = await r.json().catch(() => ({}));
-      const newItems = data.items || [];
-      setItems(newItems);
+    const res = await fetch(`/api/inbox?userId=${encodeURIComponent(uid)}`);
+    console.log("[Inbox] res", res.status);
 
-      // Badge = nombre de non-lus (best effort)
-      const unread = newItems.filter((i) => !i.readAt).length;
-      if ("setAppBadge" in navigator) {
-        if (unread > 0) navigator.setAppBadge(unread);
-        else navigator.clearAppBadge();
-      }
-    } catch (e) {
-      // En MVP, on reste simple : pas de crash, pas de toast complexe
-      console.error("loadInbox error:", e);
-    } finally {
-      setLoading(false);
-    }
+    const data = await res.json();
+    console.log("[Inbox] data", data);
+
+    // IMPORTANT : on met à jour le state qui alimente l’UI
+    setItems(Array.isArray(data) ? data : (data.items ?? []));
+  } catch (e) {
+    console.error("[Inbox] loadInbox error", e);
+  } finally {
+    setLoading(false);
   }
+}
+
+
 
   useEffect(() => {
     loadInbox();
@@ -190,18 +189,22 @@ function Player() {
                 {!n.readAt && (
                   <button
                     className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                    onClick={async () => {
-                      try {
-                        await fetch("/api/inbox-read", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ userId, notificationId: n.id }),
-                        });
-                      } finally {
-                        // Recharge et met à jour badge
-                        await loadInbox();
-                      }
-                    }}
+onClick={async () => {
+  try {
+    const r = await fetch("/api/inbox-read", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ userId, notificationId: n.id }),
+    });
+
+    const out = await r.json().catch(() => ({}));
+    console.log("[Inbox] inbox-read", r.status, out);
+  } finally {
+    // Recharge et met à jour badge
+    await loadInbox();
+  }
+}}
+
                   >
                     Marquer comme lu
                   </button>
