@@ -96,6 +96,9 @@ function Player() {
   const [loading, setLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
 
+  // Modale de lecture
+  const [openItem, setOpenItem] = useState(null);
+
   // Non-lu = readAt strictement NULL (aligné DB)
   const unreadCount = useMemo(() => items.filter((i) => i.readAt === null).length, [items]);
 
@@ -145,16 +148,45 @@ function Player() {
     (async () => {
       try {
         if (unreadCount > 0) {
-          // iOS attend un integer
           await navigator.setAppBadge(unreadCount);
         } else {
           await navigator.clearAppBadge();
         }
       } catch {
-        // iOS peut refuser selon contexte; on ignore
+        // iOS peut refuser selon contexte; ignore
       }
     })();
   }, [unreadCount]);
+
+  // Action: Lire => ouvre la modale + marque lu (sans casser la chaîne)
+  async function readNotification(n) {
+    // 1) Ouvre la modale tout de suite
+    setOpenItem(n);
+
+    // 2) Si déjà lu, on ne refait rien
+    if (n.readAt !== null) return;
+
+    // 3) Optimiste: on marque lu côté UI immédiatement (badge baisse sans attendre)
+    const nowIso = new Date().toISOString();
+    setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, readAt: nowIso } : x)));
+
+    // 4) Persist côté backend (sans impacter le reste)
+    try {
+      await fetch("/api/inbox-read", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, notificationId: n.id }),
+      });
+    } catch (e) {
+      // Si erreur, on resynchronise (et on ne casse pas l’expérience)
+      console.error("[Inbox] inbox-read error", e);
+      await loadInbox();
+    }
+  }
+
+  function closeModal() {
+    setOpenItem(null);
+  }
 
   return (
     <div className="min-h-screen bg-white text-slate-900 p-6">
@@ -165,7 +197,6 @@ function Player() {
             <p className="mt-3 text-slate-600">V0+ — Push + Inbox minimale</p>
           </div>
 
-          {/* Compteur in-app */}
           <div className="text-sm text-slate-600 text-right">
             Inbox : <span className="font-semibold">{unreadCount}</span> non-lu
           </div>
@@ -209,9 +240,9 @@ function Player() {
             return (
               <div key={n.id} className="border rounded-xl p-4">
                 <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <div className="font-semibold">{n.title}</div>
-                    <div className="text-sm text-slate-600 mt-1">{n.body}</div>
+                  <div className="min-w-0">
+                    <div className="font-semibold truncate">{n.title}</div>
+                    <div className="text-sm text-slate-600 mt-1 line-clamp-2">{n.body}</div>
                     <div className="text-xs text-slate-400 mt-2">
                       {n.createdAt ? new Date(n.createdAt).toLocaleString() : ""}
                     </div>
@@ -225,21 +256,12 @@ function Player() {
                 </div>
 
                 <div className="mt-3 flex flex-wrap gap-2">
-                  {isUnread && (
-                    <button
-                      className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                      onClick={async () => {
-                        await fetch("/api/inbox-read", {
-                          method: "POST",
-                          headers: { "Content-Type": "application/json" },
-                          body: JSON.stringify({ userId, notificationId: n.id }),
-                        });
-                        loadInbox();
-                      }}
-                    >
-                      Marquer comme lu
-                    </button>
-                  )}
+                  <button
+                    className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
+                    onClick={() => readNotification(n)}
+                  >
+                    Lire
+                  </button>
 
                   {n.url && (
                     <a className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50" href={n.url}>
@@ -256,6 +278,56 @@ function Player() {
           Objectif : Push “best effort” + Inbox comme filet de sécurité.
         </p>
       </div>
+
+      {/* =========================
+          MODALE "Lire"
+      ========================= */}
+      {openItem && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center p-4"
+          role="dialog"
+          aria-modal="true"
+          onClick={closeModal}
+        >
+          <div className="absolute inset-0 bg-black/40" />
+
+          <div
+            className="relative w-full max-w-xl rounded-2xl bg-white shadow-xl border p-5"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-4">
+              <div className="min-w-0">
+                <div className="text-lg font-bold">{openItem.title}</div>
+                <div className="text-xs text-slate-400 mt-1">
+                  {openItem.createdAt ? new Date(openItem.createdAt).toLocaleString() : ""}
+                </div>
+              </div>
+
+              <button
+                className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
+                onClick={closeModal}
+              >
+                Fermer
+              </button>
+            </div>
+
+            <div className="mt-4 text-sm text-slate-700 whitespace-pre-wrap">
+              {openItem.body}
+            </div>
+
+            {openItem.url && (
+              <div className="mt-4">
+                <a
+                  className="inline-flex text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
+                  href={openItem.url}
+                >
+                  Ouvrir le lien
+                </a>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
