@@ -92,18 +92,17 @@ function Player() {
   const [loading, setLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
 
+  // ✅ CORRECTIF : test explicite sur NULL
   const unreadCount = useMemo(
-    () => items.filter((i) => !i.readAt).length,
+    () => items.filter((i) => i.readAt === null).length,
     [items]
   );
 
   async function loadInbox() {
     setLoading(true);
     try {
-      console.log("[Inbox] loadInbox start");
       const res = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}`);
       const data = await res.json();
-      console.log("[Inbox] data", data);
       setItems(data.items || []);
     } catch (e) {
       console.error("[Inbox] loadInbox error", e);
@@ -118,13 +117,12 @@ function Player() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  /* 2️⃣ AUTO refresh quand une push arrive */
+  /* 2️⃣ Auto-refresh quand une push arrive */
   useEffect(() => {
     if (!("serviceWorker" in navigator)) return;
 
     const handler = (event) => {
       if (event.data?.type === "INBOX_REFRESH") {
-        console.log("[SW] INBOX_REFRESH reçu");
         loadInbox();
       }
     };
@@ -191,7 +189,8 @@ function Player() {
                   </div>
                 </div>
 
-                {!n.readAt && (
+                {/* ✅ CORRECTIF */}
+                {n.readAt === null && (
                   <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
                     Nouveau
                   </span>
@@ -199,7 +198,7 @@ function Player() {
               </div>
 
               <div className="mt-3 flex gap-2">
-                {!n.readAt && (
+                {n.readAt === null && (
                   <button
                     className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
                     onClick={async () => {
