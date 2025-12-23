@@ -8,7 +8,10 @@ function requireEnv(name) {
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+    if (!["POST", "PATCH", "PUT"].includes(req.method)) {
+  return res.status(405).json({ error: "Method not allowed" });
+}
+
 
     const SUPABASE_URL = requireEnv("SUPABASE_URL");
     const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
