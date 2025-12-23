@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from "@supabase/supabase-js";
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -6,24 +6,22 @@ function requireEnv(name) {
   return v;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
-    if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
+    if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
 
-    const SUPABASE_URL = requireEnv('SUPABASE_URL');
-    const SUPABASE_SERVICE_ROLE_KEY = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+    const SUPABASE_URL = requireEnv("SUPABASE_URL");
+    const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const { userId, notificationId } = req.body || {};
-    if (!userId || !notificationId) {
-      return res.status(400).json({ error: 'userId and notificationId are required' });
-    }
+    const { notificationId, userId = "demo" } = req.body || {};
+    if (!notificationId) return res.status(400).json({ error: "notificationId required" });
 
     const { error } = await supabase
-      .from('notification_recipients')
+      .from("notification_recipients")
       .update({ read_at: new Date().toISOString() })
-      .eq('user_id', userId)
-      .eq('notification_id', notificationId);
+      .eq("notification_id", notificationId)
+      .eq("user_id", userId);
 
     if (error) return res.status(500).json({ error: error.message });
 
@@ -31,4 +29,4 @@ module.exports = async (req, res) => {
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });
   }
-};
+}

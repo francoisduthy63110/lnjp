@@ -1,4 +1,4 @@
-const { createClient } = require('@supabase/supabase-js');
+import { createClient } from "@supabase/supabase-js";
 
 function requireEnv(name) {
   const v = process.env[name];
@@ -6,47 +6,29 @@ function requireEnv(name) {
   return v;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   try {
-    const SUPABASE_URL = requireEnv('SUPABASE_URL');
-    const SUPABASE_SERVICE_ROLE_KEY = requireEnv('SUPABASE_SERVICE_ROLE_KEY');
+    if (req.method !== "GET") return res.status(405).json({ error: "Method not allowed" });
+
+    const SUPABASE_URL = requireEnv("SUPABASE_URL");
+    const SUPABASE_SERVICE_ROLE_KEY = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
-    const userId = req.query.userId;
-    if (!userId) return res.status(400).json({ error: 'userId is required' });
+    // MVP: userId passé en querystring (ex: ?userId=demo)
+    const userId = req.query?.userId || "demo";
 
     const { data, error } = await supabase
-      .from('notification_recipients')
-      .select(`
-        notification_id,
-        status,
-        sent_at,
-        read_at,
-        notifications:notifications (
-          id,
-          title,
-          body,
-          url,
-          created_at
-        )
-      `)
-      .eq('user_id', userId)
-      .order('sent_at', { ascending: false, nullsFirst: false });
+      .from("notifications")
+      .select("id,title,body,url,created_at")
+      .order("created_at", { ascending: false })
+      .limit(50);
 
     if (error) return res.status(500).json({ error: error.message });
 
-    const items = (data || []).map(r => ({
-      id: r.notifications.id,
-      title: r.notifications.title,
-      body: r.notifications.body,
-      url: r.notifications.url,
-      createdAt: r.notifications.created_at,
-      readAt: r.read_at,
-      status: r.status,
-    }));
-
-    return res.json({ ok: true, items });
+    // MVP: unread = tout (on raffinera quand on lie recipients au user)
+    return res.json({ ok: true, userId, items: data || [] });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });
   }
-};
+}
