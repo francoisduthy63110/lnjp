@@ -1,21 +1,18 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { supabase } from "../lib/supabase";
 import NotificationsPanel from "./NotificationsPanel";
 
 /**
- * PlayerHome : UX friendly avec 2 onglets
- * - Messagerie (salon unique par ligue) + badge unread
- * - Notifications (socle inchangé extrait) + badge unread
+ * PlayerHome (MVP)
+ * - 2 onglets: Messagerie / Notifications
+ * - aucune dépendance à Supabase Auth
+ * - Messagerie via API server (/api/chat-*)
  */
-export default function PlayerHome({ profile, onSignOut }) {
+export default function PlayerHome({ displayName, leagueCode, userId, onSignOut }) {
   const [activeTab, setActiveTab] = useState("chat");
   const [notifUnread, setNotifUnread] = useState(0);
   const [chatUnread, setChatUnread] = useState(0);
 
-  const meLabel = useMemo(() => {
-    if (!profile?.display_name) return "";
-    return `${profile.display_name}${profile.role === "admin" ? " (Admin)" : ""}`;
-  }, [profile]);
+  const meLabel = useMemo(() => `${displayName} — Ligue ${leagueCode}`, [displayName, leagueCode]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-6">
@@ -27,7 +24,7 @@ export default function PlayerHome({ profile, onSignOut }) {
           </div>
 
           <button className="text-sm underline text-slate-600" onClick={onSignOut}>
-            Se déconnecter
+            Quitter
           </button>
         </div>
 
@@ -47,7 +44,12 @@ export default function PlayerHome({ profile, onSignOut }) {
         </div>
 
         {activeTab === "chat" ? (
-          <ChatRoom onUnreadCountChange={(n) => setChatUnread(n)} />
+          <ChatRoom
+            leagueCode={leagueCode}
+            userId={userId}
+            displayName={displayName}
+            onUnreadCountChange={(n) => setChatUnread(n)}
+          />
         ) : (
           <NotificationsPanel onUnreadCountChange={(n) => setNotifUnread(n)} />
         )}
@@ -79,197 +81,116 @@ function TabButton({ label, active, onClick, badge }) {
 
 /* =========================
    CHAT (salon unique)
-   - tables: leagues, profiles, messages, league_reads
+   - API server
+   - Unread basé sur lastReadAt localStorage
 ========================= */
 
-function ChatRoom({ onUnreadCountChange }) {
-  const [league, setLeague] = useState(null);
+function ChatRoom({ leagueCode, userId, displayName, onUnreadCountChange }) {
   const [messages, setMessages] = useState([]);
   const [busy, setBusy] = useState(true);
   const [text, setText] = useState("");
   const [error, setError] = useState("");
 
   const bottomRef = useRef(null);
-  const myUserIdRef = useRef(null);
+
+  const lastReadKey = useMemo(() => `lnjp_chat_last_read_${leagueCode}`, [leagueCode]);
 
   const scrollToBottom = (smooth = true) =>
     bottomRef.current?.scrollIntoView({ behavior: smooth ? "smooth" : "auto" });
 
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => {
-      myUserIdRef.current = data?.user?.id ?? null;
-    });
-  }, []);
+  function getLastReadAt() {
+    return localStorage.getItem(lastReadKey) || "1970-01-01T00:00:00.000Z";
+  }
 
-  // Unread refresh (poll léger, MVP)
-  useEffect(() => {
-    if (!league?.id) return;
+  function markReadNow() {
+    localStorage.setItem(lastReadKey, new Date().toISOString());
+    onUnreadCountChange?.(0);
+  }
 
+  function computeUnread(list) {
+    const lastReadAt = getLastReadAt();
+    const n = (list || []).filter((m) => m.createdAt > lastReadAt).length;
+    return n;
+  }
+
+  async function load() {
+    setError("");
+    setBusy(true);
+    try {
+      const res = await fetch(`/api/chat-list?leagueCode=${encodeURIComponent(leagueCode)}`);
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Erreur chargement chat.");
+
+      setMessages(data.items || []);
+
+      // Si la conversation est ouverte, on marque lu
+      markReadNow();
+      setTimeout(() => scrollToBottom(false), 20);
+    } catch (e) {
+      setError(e?.message ?? "Erreur chat.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // Chargement initial + polling (MVP)
+  useEffect(() => {
     let alive = true;
+
     const tick = async () => {
       try {
-        const n = await getChatUnreadCount(league.id);
+        const res = await fetch(`/api/chat-list?leagueCode=${encodeURIComponent(leagueCode)}`);
+        const data = await res.json();
         if (!alive) return;
-        onUnreadCountChange?.(n);
+        if (!res.ok || !data?.ok) return;
+
+        const next = data.items || [];
+        setMessages(next);
+
+        // Unread pour badge (si l’utilisateur n’est pas forcément dans l’onglet chat, le parent gère)
+        const unread = computeUnread(next);
+        onUnreadCountChange?.(unread);
       } catch {
         // silencieux MVP
       }
     };
 
-    tick();
-    const id = setInterval(tick, 5000);
+    // première charge “propre”
+    load();
+
+    const id = setInterval(tick, 2500);
     return () => {
       alive = false;
       clearInterval(id);
     };
-  }, [league?.id, onUnreadCountChange]);
-
-  useEffect(() => {
-    let alive = true;
-    let channel = null;
-
-    (async () => {
-      setBusy(true);
-      setError("");
-      try {
-        // ligue unique = première ligue
-        const { data: l, error: le } = await supabase
-          .from("leagues")
-          .select("id, name, created_at")
-          .order("created_at", { ascending: true })
-          .limit(1)
-          .maybeSingle();
-
-        if (le) throw le;
-        if (!l) throw new Error("Aucune ligue trouvée (seed requis).");
-
-        if (!alive) return;
-        setLeague(l);
-
-        const initial = await loadMessages(l.id);
-        if (!alive) return;
-        setMessages(initial);
-
-        // IMPORTANT: on marque lu dès l'ouverture
-        await markRead(l.id);
-        onUnreadCountChange?.(0);
-
-        setTimeout(() => scrollToBottom(false), 50);
-
-        // Realtime : refresh simple (MVP)
-        channel = supabase
-          .channel(`messages:${l.id}`)
-          .on(
-            "postgres_changes",
-            { event: "INSERT", schema: "public", table: "messages", filter: `league_id=eq.${l.id}` },
-            async () => {
-              const refreshed = await loadMessages(l.id);
-              if (!alive) return;
-              setMessages(refreshed);
-
-              // si la conversation est ouverte, on considère lu
-              await markRead(l.id);
-              onUnreadCountChange?.(0);
-
-              setTimeout(() => scrollToBottom(true), 30);
-            }
-          )
-          .subscribe();
-      } catch (e) {
-        setError(e?.message ?? "Erreur chat.");
-      } finally {
-        setBusy(false);
-      }
-    })();
-
-    return () => {
-      alive = false;
-      if (channel) supabase.removeChannel(channel);
-    };
-  }, [onUnreadCountChange]);
-
-  async function loadMessages(leagueId) {
-    const { data, error } = await supabase
-      .from("messages")
-      .select("id, content, created_at, user_id, profiles(display_name, role)")
-      .eq("league_id", leagueId)
-      .order("created_at", { ascending: false })
-      .limit(80);
-
-    if (error) throw error;
-    return (data ?? []).slice().reverse();
-  }
-
-  async function markRead(leagueId) {
-    const { data: u } = await supabase.auth.getUser();
-    const user = u?.user;
-    if (!user) return;
-
-    const { error } = await supabase.from("league_reads").upsert(
-      {
-        league_id: leagueId,
-        user_id: user.id,
-        last_read_at: new Date().toISOString(),
-      },
-      { onConflict: "league_id,user_id" }
-    );
-
-    if (error) {
-      // ne bloque pas le chat en MVP
-      console.warn("[Chat] markRead error", error.message);
-    }
-  }
-
-  async function getChatUnreadCount(leagueId) {
-    const { data: u } = await supabase.auth.getUser();
-    const user = u?.user;
-    if (!user) return 0;
-
-    // last_read_at
-    const { data: readRow, error: re } = await supabase
-      .from("league_reads")
-      .select("last_read_at")
-      .eq("league_id", leagueId)
-      .eq("user_id", user.id)
-      .maybeSingle();
-
-    if (re) throw re;
-
-    const lastReadAt = readRow?.last_read_at ?? "1970-01-01T00:00:00.000Z";
-
-    // count messages after lastReadAt
-    const { count, error } = await supabase
-      .from("messages")
-      .select("id", { count: "exact", head: true })
-      .eq("league_id", leagueId)
-      .gt("created_at", lastReadAt);
-
-    if (error) throw error;
-
-    // si tu es dans l'onglet chat, on ne veut pas afficher un badge
-    return count ?? 0;
-  }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [leagueCode]);
 
   async function send() {
-    if (!league?.id) return;
     const trimmed = text.trim();
     if (!trimmed) return;
 
     setError("");
     try {
-      const { data: u } = await supabase.auth.getUser();
-      const user = u?.user;
-      if (!user) throw new Error("Non connecté.");
-
-      const { error } = await supabase.from("messages").insert({
-        league_id: league.id,
-        user_id: user.id,
-        content: trimmed,
+      const res = await fetch("/api/chat-send", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leagueCode,
+          userId,
+          displayName,
+          content: trimmed,
+        }),
       });
-      if (error) throw error;
+
+      const data = await res.json();
+      if (!res.ok || !data?.ok) throw new Error(data?.error || "Impossible d’envoyer.");
 
       setText("");
-      setTimeout(() => scrollToBottom(true), 30);
+
+      // refresh
+      await load();
+      setTimeout(() => scrollToBottom(true), 20);
     } catch (e) {
       setError(e?.message ?? "Impossible d’envoyer le message.");
     }
@@ -278,18 +199,20 @@ function ChatRoom({ onUnreadCountChange }) {
   return (
     <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
       <div className="p-4 border-b">
-        <div className="font-bold">{league?.name ?? "Messagerie"}</div>
+        <div className="font-bold">Messagerie</div>
         <div className="text-sm text-slate-600">Salon unique de la ligue</div>
       </div>
 
-      <div className="h-[55vh] overflow-auto p-4 space-y-3 bg-slate-50">
+      <div className="h-[55vh] overflow-auto p-4 space-y-3 bg-slate-50" onClick={markReadNow}>
         {busy ? <div className="text-sm text-slate-600">Chargement…</div> : null}
         {error ? <div className="text-sm text-red-600">{error}</div> : null}
 
         {messages.map((m) => {
-          const name = m?.profiles?.display_name ?? "…";
-          const isMe = myUserIdRef.current && m.user_id === myUserIdRef.current;
-          const time = new Date(m.created_at).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+          const name = m.displayName || "…";
+          const isMe = m.userId === userId;
+          const time = m.createdAt
+            ? new Date(m.createdAt).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" })
+            : "";
 
           return (
             <div key={m.id} className={["max-w-[85%]", isMe ? "ml-auto text-right" : ""].join(" ")}>
