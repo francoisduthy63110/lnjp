@@ -3,13 +3,16 @@ import { enablePushNotifications } from "../lib/push";
 import { getCurrentUserId } from "../lib/user";
 
 /**
- * Extraction directe de l'ancien Player() (socle Notifications).
- * Objectif : ne rien casser.
+ * NotificationsPanel (MVP clean)
+ * Objectif: rester compatible avec le socle existant (push + inbox), tout en simplifiant l’UX.
  *
- * Différences volontaires (UX) :
- * - on enlève le gros header LNJP + V0
- * - on garde : liste, badge iOS, auto-refresh SW, modale "Lire" => mark read
- * - on garde un bouton d'activation push (utile), mais moins "test"
+ * Règles:
+ * - plus de bouton "Ouvrir"
+ * - plus de bouton "Rafraîchir" (auto-refresh via SW + polling parent)
+ * - afficher 5 dernières par défaut + bouton "Charger l’historique"
+ * - bouton "Supprimer"
+ * - modale = contenu complet (pas de bouton "Ouvrir le lien")
+ * - purge auto des notifs > 7 jours côté API (/api/inbox)
  */
 export default function NotificationsPanel({ onUnreadCountChange }) {
   const userId = useMemo(() => getCurrentUserId(), []);
@@ -17,20 +20,27 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
   const [loading, setLoading] = useState(false);
   const [pushEnabled, setPushEnabled] = useState(false);
 
-  // Modale de lecture
+  // pagination simple
+  const [limit, setLimit] = useState(5);
+  const [hasMore, setHasMore] = useState(false);
+
+  // Modale
   const [openItem, setOpenItem] = useState(null);
 
-  // Non-lu = readAt strictement NULL (aligné DB)
   const unreadCount = useMemo(() => items.filter((i) => i.readAt === null).length, [items]);
 
-  async function loadInbox() {
+  async function loadInbox({ nextLimit } = {}) {
+    const lim = typeof nextLimit === "number" ? nextLimit : limit;
+
     setLoading(true);
     try {
-      const res = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}`);
+      const res = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}&limit=${lim}&offset=0`);
       const data = await res.json();
-      setItems(data.items || []);
+      const next = data.items || [];
+      setItems(next);
+      setHasMore(Boolean(data.total && data.total > next.length));
     } catch (e) {
-      console.error("[Inbox] loadInbox error", e);
+      console.error("[Inbox] load error", e);
     } finally {
       setLoading(false);
     }
@@ -38,7 +48,7 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
 
   // 1) Chargement initial
   useEffect(() => {
-    loadInbox();
+    loadInbox({ nextLimit: 5 });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -48,6 +58,7 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
 
     const handler = (event) => {
       if (event.data?.type === "INBOX_REFRESH") {
+        // recharge sans changer la limite courante
         loadInbox();
       }
     };
@@ -55,14 +66,12 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
     navigator.serviceWorker.addEventListener("message", handler);
     return () => navigator.serviceWorker.removeEventListener("message", handler);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [limit]);
 
-  // 3) Badge iOS / PWA (pastille sur l’icône) via Badging API si supportée
+  // 3) Badge iOS / PWA via Badging API si supportée
   useEffect(() => {
     const hasBadging =
-      typeof navigator !== "undefined" &&
-      "setAppBadge" in navigator &&
-      "clearAppBadge" in navigator;
+      typeof navigator !== "undefined" && "setAppBadge" in navigator && "clearAppBadge" in navigator;
 
     if (!hasBadging) return;
 
@@ -74,7 +83,7 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
           await navigator.clearAppBadge();
         }
       } catch {
-        // iOS peut refuser selon contexte; ignore
+        // ignore
       }
     })();
   }, [unreadCount]);
@@ -84,19 +93,25 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
     onUnreadCountChange?.(unreadCount);
   }, [unreadCount, onUnreadCountChange]);
 
-  // Action: Lire => ouvre la modale + marque lu (sans casser la chaîne)
+  async function ensurePush() {
+    try {
+      await enablePushNotifications(userId);
+      setPushEnabled(true);
+    } catch (e) {
+      console.error("[Push] enable error", e);
+      alert("Impossible d’activer les notifications push sur cet appareil.");
+    }
+  }
+
+  // Lire = ouvre modale + mark read (global MVP)
   async function readNotification(n) {
-    // 1) Ouvre la modale tout de suite
     setOpenItem(n);
 
-    // 2) Si déjà lu, on ne refait rien
     if (n.readAt !== null) return;
 
-    // 3) Optimiste: on marque lu côté UI immédiatement (badge baisse sans attendre)
     const nowIso = new Date().toISOString();
     setItems((prev) => prev.map((x) => (x.id === n.id ? { ...x, readAt: nowIso } : x)));
 
-    // 4) Persist côté backend (sans impacter le reste)
     try {
       await fetch("/api/inbox-read", {
         method: "POST",
@@ -104,8 +119,29 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
         body: JSON.stringify({ userId, notificationId: n.id }),
       });
     } catch (e) {
-      // Si erreur, on resynchronise (et on ne casse pas l’expérience)
       console.error("[Inbox] inbox-read error", e);
+      await loadInbox();
+    }
+  }
+
+  async function deleteNotification(n) {
+    const ok = confirm("Supprimer cette notification ?");
+    if (!ok) return;
+
+    // optimiste
+    setItems((prev) => prev.filter((x) => x.id !== n.id));
+    if (openItem?.id === n.id) setOpenItem(null);
+
+    try {
+      await fetch("/api/inbox-delete", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ userId, notificationId: n.id }),
+      });
+      // resync léger
+      await loadInbox();
+    } catch (e) {
+      console.error("[Inbox] inbox-delete error", e);
       await loadInbox();
     }
   }
@@ -114,94 +150,95 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
     setOpenItem(null);
   }
 
+  async function loadHistory() {
+    const next = Math.min(limit + 20, 200);
+    setLimit(next);
+    await loadInbox({ nextLimit: next });
+  }
+
   return (
-    <div className="bg-white border rounded-2xl shadow-sm">
-      <div className="p-4 border-b flex items-start justify-between gap-3">
+    <div className="bg-white border rounded-2xl shadow-sm overflow-hidden">
+      <div className="p-4 border-b flex items-center justify-between gap-4">
         <div className="min-w-0">
-          <div className="text-lg font-bold">Notifications</div>
-          <div className="text-sm text-slate-600">
-            {unreadCount} non-lu{unreadCount > 1 ? "s" : ""}
-          </div>
+          <div className="font-bold">Notifications</div>
+          <div className="text-sm text-slate-600">{unreadCount} non-lu</div>
         </div>
 
-        <div className="flex gap-2 shrink-0">
+        <div className="flex items-center gap-2">
           <button
-            className="rounded-xl bg-slate-900 text-white px-3 py-2 text-sm font-semibold hover:bg-slate-800"
-            onClick={async () => {
-              try {
-                await enablePushNotifications();
-                setPushEnabled(true);
-                alert("Notifications activées.");
-              } catch (e) {
-                alert(`Erreur: ${e?.message || e}`);
-              }
-            }}
-            title="Activer les notifications push"
+            className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold"
+            onClick={ensurePush}
+            disabled={pushEnabled}
+            title={pushEnabled ? "Déjà activé sur cet appareil" : "Activer les notifications push"}
           >
-            {pushEnabled ? "Push activées" : "Activer push"}
-          </button>
-
-          <button
-            className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-medium hover:bg-slate-50"
-            onClick={loadInbox}
-            disabled={loading}
-            title="Rafraîchir l’inbox"
-          >
-            {loading ? "..." : "Rafraîchir"}
+            {pushEnabled ? "Push activé" : "Activer push"}
           </button>
         </div>
       </div>
 
       <div className="p-4 space-y-3 bg-slate-50">
-        {items.length === 0 && (
-          <div className="text-sm text-slate-500 border rounded-xl p-4 bg-white">
-            Aucune notification pour l’instant.
-          </div>
-        )}
+        {loading ? <div className="text-sm text-slate-600">Chargement…</div> : null}
+
+        {items.length === 0 && !loading ? (
+          <div className="text-sm text-slate-600">Aucune notification.</div>
+        ) : null}
 
         {items.map((n) => {
-          const isUnread = n.readAt === null;
+          const ts = n.createdAt
+            ? new Date(n.createdAt).toLocaleString([], {
+                year: "numeric",
+                month: "2-digit",
+                day: "2-digit",
+                hour: "2-digit",
+                minute: "2-digit",
+              })
+            : "";
 
           return (
-            <div key={n.id} className="border rounded-xl p-4 bg-white">
-              <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <div className="font-semibold truncate">{n.title}</div>
-                  <div className="text-sm text-slate-600 mt-1 line-clamp-2">{n.body}</div>
-                  <div className="text-xs text-slate-400 mt-2">
-                    {n.createdAt ? new Date(n.createdAt).toLocaleString() : ""}
-                  </div>
+            <div
+              key={n.id}
+              className={[
+                "rounded-2xl border bg-white p-4 flex items-center justify-between gap-3",
+                n.readAt === null ? "border-slate-900" : "",
+              ].join(" ")}
+            >
+              <div className="min-w-0">
+                <div className="text-sm font-semibold">
+                  Lire nouveau message
+                  {n.readAt === null ? <span className="ml-2 text-xs text-red-600">(nouveau)</span> : null}
                 </div>
-
-                {isUnread && (
-                  <span className="text-xs bg-slate-900 text-white rounded-full px-2 py-1">
-                    Nouveau
-                  </span>
-                )}
+                <div className="text-xs text-slate-500">{ts}</div>
               </div>
 
-              <div className="mt-3 flex flex-wrap gap-2">
+              <div className="flex items-center gap-2 shrink-0">
                 <button
-                  className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
+                  className="border rounded-xl px-3 py-2 text-sm font-semibold"
                   onClick={() => readNotification(n)}
                 >
                   Lire
                 </button>
-
-                {n.url && (
-                  <a className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50" href={n.url}>
-                    Ouvrir
-                  </a>
-                )}
+                <button
+                  className="border rounded-xl px-3 py-2 text-sm text-slate-600"
+                  onClick={() => deleteNotification(n)}
+                >
+                  Supprimer
+                </button>
               </div>
             </div>
           );
         })}
+
+        {hasMore ? (
+          <button
+            className="w-full border rounded-xl py-3 text-sm font-semibold bg-white"
+            onClick={loadHistory}
+            disabled={loading}
+          >
+            {loading ? "..." : "Charger l’historique"}
+          </button>
+        ) : null}
       </div>
 
-      {/* =========================
-          MODALE "Lire"
-      ========================= */}
       {openItem && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center p-4"
@@ -210,41 +247,24 @@ export default function NotificationsPanel({ onUnreadCountChange }) {
           onClick={closeModal}
         >
           <div className="absolute inset-0 bg-black/40" />
-
           <div
             className="relative w-full max-w-xl rounded-2xl bg-white shadow-xl border p-5"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-4">
               <div className="min-w-0">
-                <div className="text-lg font-bold">{openItem.title}</div>
-                <div className="text-xs text-slate-400 mt-1">
+                <div className="text-lg font-bold">{openItem.title || "LNJP"}</div>
+                <div className="text-sm text-slate-600">
                   {openItem.createdAt ? new Date(openItem.createdAt).toLocaleString() : ""}
                 </div>
               </div>
 
-              <button
-                className="text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                onClick={closeModal}
-              >
+              <button className="border rounded-xl px-4 py-2 text-sm font-semibold" onClick={closeModal}>
                 Fermer
               </button>
             </div>
 
-            <div className="mt-4 text-sm text-slate-700 whitespace-pre-wrap">
-              {openItem.body}
-            </div>
-
-            {openItem.url && (
-              <div className="mt-4">
-                <a
-                  className="inline-flex text-sm rounded-lg border px-3 py-2 hover:bg-slate-50"
-                  href={openItem.url}
-                >
-                  Ouvrir le lien
-                </a>
-              </div>
-            )}
+            <div className="mt-4 whitespace-pre-wrap text-slate-900">{openItem.body}</div>
           </div>
         </div>
       )}

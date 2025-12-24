@@ -6,6 +6,11 @@ function requireEnv(name) {
   return v;
 }
 
+function toInt(v, def) {
+  const n = parseInt(String(v ?? ""), 10);
+  return Number.isFinite(n) && n >= 0 ? n : def;
+}
+
 export default async function handler(req, res) {
   try {
     res.setHeader("Cache-Control", "no-store, max-age=0");
@@ -18,11 +23,31 @@ export default async function handler(req, res) {
     // MVP: userId passé en querystring (ex: ?userId=demo)
     const userId = req.query?.userId || "demo";
 
+    // Pagination
+    const limit = Math.min(toInt(req.query?.limit, 50), 200);
+    const offset = toInt(req.query?.offset, 0);
+
+    // MVP: purge auto des notifications trop anciennes (global)
+    const cutoff = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000).toISOString();
+    try {
+      await supabase.from("notifications").delete().lt("created_at", cutoff);
+    } catch {
+      // ignore purge errors
+    }
+
+    // Total (pour "Charger l’historique")
+    const { count, error: countErr } = await supabase
+      .from("notifications")
+      .select("id", { count: "exact", head: true });
+
+    if (countErr) return res.status(500).json({ error: countErr.message });
+
+    // Data
     const { data, error } = await supabase
       .from("notifications")
       .select("id,title,body,url,created_at,read_at")
       .order("created_at", { ascending: false })
-      .limit(50);
+      .range(offset, offset + limit - 1);
 
     if (error) return res.status(500).json({ error: error.message });
 
@@ -34,8 +59,8 @@ export default async function handler(req, res) {
       createdAt: n.created_at,
       readAt: n.read_at,
     }));
-res.setHeader("Cache-Control", "no-store, max-age=0");
-    return res.json({ ok: true, userId, items });
+
+    return res.json({ ok: true, userId, items, total: count ?? items.length });
   } catch (e) {
     return res.status(500).json({ error: e.message || String(e) });
   }

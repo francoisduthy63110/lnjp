@@ -6,6 +6,10 @@ import NotificationsPanel from "./NotificationsPanel";
  * - 2 onglets: Messagerie / Notifications
  * - aucune dépendance à Supabase Auth
  * - Messagerie via API server (/api/chat-*)
+ *
+ * Fix MVP demandé :
+ * - badges "temps réel" même quand l’onglet n’est pas actif
+ *   => polling global léger (chat + inbox)
  */
 export default function PlayerHome({ displayName, leagueCode, userId, onSignOut }) {
   const [activeTab, setActiveTab] = useState("chat");
@@ -13,6 +17,64 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
   const [chatUnread, setChatUnread] = useState(0);
 
   const meLabel = useMemo(() => `${displayName} — Ligue ${leagueCode}`, [displayName, leagueCode]);
+
+  // Keys de "read" (MVP) : stockées en local (pas par user côté serveur)
+  const chatLastReadKey = useMemo(() => `lnjp_chat_last_read_${leagueCode}`, [leagueCode]);
+
+  const getChatLastReadAt = () =>
+    localStorage.getItem(chatLastReadKey) || "1970-01-01T00:00:00.000Z";
+
+  // Polling global: update badges même si onglet non monté
+  useEffect(() => {
+    let alive = true;
+
+    async function poll() {
+      try {
+        // 1) Unread Chat
+        const chatRes = await fetch(`/api/chat-list?leagueCode=${encodeURIComponent(leagueCode)}`);
+        const chatData = await chatRes.json();
+        if (alive && chatRes.ok && chatData?.ok) {
+          const items = chatData.items || [];
+          const lastReadAt = getChatLastReadAt();
+          const unread = items.filter((m) => m.createdAt > lastReadAt).length;
+          setChatUnread(unread);
+        }
+
+        // 2) Unread Inbox (notifications)
+        const inboxRes = await fetch(`/api/inbox?userId=${encodeURIComponent(userId)}&limit=50&offset=0`);
+        const inboxData = await inboxRes.json();
+        if (alive && inboxRes.ok && inboxData?.ok) {
+          const items = inboxData.items || [];
+          const unread = items.filter((n) => n.readAt === null).length;
+          setNotifUnread(unread);
+        }
+      } catch {
+        // silencieux MVP
+      }
+    }
+
+    // tick initial + interval
+    poll();
+    const id = setInterval(poll, 2500);
+
+    // refresh immédiat quand le SW pousse un message (push reçu)
+    const swHandler = (event) => {
+      if (event.data?.type === "INBOX_REFRESH") {
+        poll();
+      }
+    };
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.addEventListener("message", swHandler);
+    }
+
+    return () => {
+      alive = false;
+      clearInterval(id);
+      if ("serviceWorker" in navigator) {
+        navigator.serviceWorker.removeEventListener("message", swHandler);
+      }
+    };
+  }, [leagueCode, userId, chatLastReadKey]);
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 p-6">
@@ -147,7 +209,6 @@ function ChatRoom({ leagueCode, userId, displayName, onUnreadCountChange }) {
         const next = data.items || [];
         setMessages(next);
 
-        // Unread pour badge (si l’utilisateur n’est pas forcément dans l’onglet chat, le parent gère)
         const unread = computeUnread(next);
         onUnreadCountChange?.(unread);
       } catch {
