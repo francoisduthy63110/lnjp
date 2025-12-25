@@ -4,7 +4,6 @@ import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
 import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
 
-
 function requireEnv(name) {
   const v = process.env[name];
   if (!v) throw new Error(`Missing env: ${name}`);
@@ -42,6 +41,15 @@ function getAction(req) {
   }
 }
 
+function getQueryParam(req, name) {
+  try {
+    const u = new URL(req.url, "http://localhost");
+    return u.searchParams.get(name);
+  } catch {
+    return null;
+  }
+}
+
 /* ---------------------------
    Handlers (ex-admin routes)
 --------------------------- */
@@ -50,24 +58,29 @@ async function handleDaysList(req, res) {
   if (req.method !== "GET") return json(res, 405, { ok: false, error: "Method not allowed" });
   assertAdmin(req);
 
-  // Lit Supabase (jours créés)
+  // On filtre par ligue (grain fonctionnel)
+  const leagueCode = getQueryParam(req, "leagueCode") || "LNJP";
+
   const { data, error } = await supabaseAdmin
     .from("days")
-    .select("id,sport,competition_code,matchday,title,deadline_at,status,created_by,created_at,published_at,featured_match_external_id,updated_at")
+    .select(
+      "id,league_code,sport,competition_code,matchday,title,deadline_at,status,created_by,created_at,published_at,featured_match_external_id,updated_at"
+    )
+    .eq("league_code", leagueCode)
     .eq("competition_code", "FL1")
     .order("matchday", { ascending: true });
 
   if (error) return json(res, 500, { ok: false, error: error.message || String(error) });
 
-  return json(res, 200, { ok: true, days: data || [] });
+  return json(res, 200, { ok: true, leagueCode, days: data || [] });
 }
 
 async function handleDaysSave(req, res) {
   if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
   assertAdmin(req);
 
-  const { matchday, deadlineAt, featuredExternalMatchId, matches, adminId } = req.body || {};
-  if (!matchday || !deadlineAt || !featuredExternalMatchId || !Array.isArray(matches)) {
+  const { leagueCode, matchday, deadlineAt, featuredExternalMatchId, matches, adminId } = req.body || {};
+  if (!leagueCode || !matchday || !deadlineAt || !featuredExternalMatchId || !Array.isArray(matches)) {
     return json(res, 400, { ok: false, error: "Invalid payload" });
   }
 
@@ -76,6 +89,7 @@ async function handleDaysSave(req, res) {
     .from("days")
     .upsert(
       {
+        league_code: leagueCode,
         sport: "football",
         competition_code: "FL1",
         matchday,
@@ -85,7 +99,8 @@ async function handleDaysSave(req, res) {
         status: "DRAFT",
         created_by: adminId || "admin_system",
       },
-      { onConflict: "competition_code,matchday" }
+      // Grain: une journée par ligue / compétition / matchday
+      { onConflict: "league_code,competition_code,matchday" }
     )
     .select("*")
     .single();
@@ -93,10 +108,7 @@ async function handleDaysSave(req, res) {
   if (dayError) return json(res, 500, { ok: false, error: dayError.message || String(dayError) });
 
   // 2) Nettoyage des matchs existants
-  const { error: delError } = await supabaseAdmin
-    .from("day_matches")
-    .delete()
-    .eq("day_id", day.id);
+  const { error: delError } = await supabaseAdmin.from("day_matches").delete().eq("day_id", day.id);
 
   if (delError) return json(res, 500, { ok: false, error: delError.message || String(delError) });
 
@@ -135,7 +147,6 @@ async function handleDaysSave(req, res) {
 }
 
 async function handleFootballFl1Upcoming(req, res) {
-  // ton fichier existant était déjà "lecture Football-Data"
   if (req.method !== "GET") return json(res, 405, { ok: false, error: "Method not allowed" });
 
   const count = Math.min(Math.max(Number(req.query?.count || 5), 1), 10);
@@ -143,18 +154,15 @@ async function handleFootballFl1Upcoming(req, res) {
   if (!token) return json(res, 500, { ok: false, error: "Missing FOOTBALL_DATA_TOKEN" });
 
   const headers = { "X-Auth-Token": token };
-  // On récupère des matchs FL1 (Ligue 1)
   const r = await fetch("https://api.football-data.org/v4/competitions/FL1/matches?status=SCHEDULED", { headers });
   if (!r.ok) return json(res, 500, { ok: false, error: `Football-Data HTTP ${r.status}` });
   const payload = await r.json();
 
   const matches = Array.isArray(payload?.matches) ? payload.matches : [];
 
-  // calc currentMatchday = min matchday à venir
   const mdList = matches.map((m) => m.matchday).filter((x) => Number.isFinite(x));
   const currentMatchday = mdList.length ? Math.min(...mdList) : null;
 
-  // group par matchday, puis prendre +1 -> +N
   const groups = new Map();
   for (const m of matches) {
     const md = Number(m.matchday);
@@ -205,7 +213,6 @@ async function handleAdminNotify(req, res) {
   const { data: subs, error: subsErr } = await sb.from("push_subscriptions").select("*");
   if (subsErr) return json(res, 500, { error: subsErr.message || String(subsErr) });
 
-  // inbox notification
   const { data: notif, error: notifErr } = await sb
     .from("inbox_notifications")
     .insert({ title, body, url: url || "/", is_read: false })
@@ -250,11 +257,7 @@ async function handleAdminChat(req, res) {
   const { message } = req.body || {};
   if (!message) return json(res, 400, { error: "message is required" });
 
-  const { data, error } = await sb
-    .from("chat_messages")
-    .insert({ role: "admin", content: message })
-    .select("*")
-    .single();
+  const { data, error } = await sb.from("chat_messages").insert({ role: "admin", content: message }).select("*").single();
 
   if (error) return json(res, 500, { error: error.message || String(error) });
 
