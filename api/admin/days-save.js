@@ -9,6 +9,7 @@ function isAdmin(req) {
 
 export default async function handler(req, res) {
   try {
+    // 1) Guards
     if (req.method !== "POST") {
       return res.status(405).json({ error: "Method not allowed" });
     }
@@ -24,12 +25,18 @@ export default async function handler(req, res) {
 
     const supabase = createClient(supabaseUrl, serviceKey);
 
+    // 2) Input
     const body = req.body || {};
     const md = Number(body.matchday);
     const deadlineAt = body.deadlineAt;
-    const featuredExternalMatchId = body.featuredExternalMatchId ?? null;
     const matches = body.matches;
 
+    const featuredExternalMatchId =
+      body.featuredExternalMatchId === undefined || body.featuredExternalMatchId === null
+        ? null
+        : Number(body.featuredExternalMatchId);
+
+    // 3) Validations minimales
     if (!Number.isInteger(md)) {
       return res.status(400).json({ error: "matchday is required (integer)" });
     }
@@ -40,11 +47,17 @@ export default async function handler(req, res) {
       return res.status(400).json({ error: "matches is required (non-empty array)" });
     }
 
+    const ids = matches.map((x) => Number(x)).filter((x) => Number.isFinite(x));
+    if (ids.length === 0) {
+      return res.status(400).json({ error: "matches must contain numeric ids" });
+    }
+
+    // 4) Contexte MVP
     const competitionCode = "FL1";
     const title = `Ligue 1 — Journée ${md}`;
     const createdBy = process.env.ADMIN_SYSTEM_USER_ID || "admin_system";
 
-    // 1) Upsert dans days (clé logique: competition_code + matchday)
+    // 5) Upsert day
     const { data: day, error: dayErr } = await supabase
       .from("days")
       .upsert(
@@ -54,10 +67,11 @@ export default async function handler(req, res) {
           matchday: md,
           title,
           deadline_at: deadlineAt,
-          // IMPORTANT: dans ta table, la bonne colonne est featured_match_external_id
-          featured_match_external_id: featuredExternalMatchId,
           status: "DRAFT",
           created_by: createdBy,
+
+          // colonne réelle dans ton schéma days
+          featured_match_external_id: featuredExternalMatchId,
         },
         { onConflict: "competition_code,matchday" }
       )
@@ -70,7 +84,7 @@ export default async function handler(req, res) {
 
     const dayId = day.id;
 
-    // 2) delete + insert dans day_match_links (table de lien)
+    // 6) Replace links
     const { error: delErr } = await supabase
       .from("day_match_links")
       .delete()
@@ -80,16 +94,11 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "day_match_links delete failed", details: delErr.message });
     }
 
-    const feat = featuredExternalMatchId != null ? Number(featuredExternalMatchId) : null;
-
-    const rows = matches.map((id) => {
-      const extId = Number(id);
-      return {
-        day_id: dayId,
-        external_match_id: extId,
-        is_featured: feat != null && extId === feat,
-      };
-    });
+    const rows = ids.map((extId) => ({
+      day_id: dayId,
+      external_match_id: extId,
+      is_featured: featuredExternalMatchId != null && extId === featuredExternalMatchId,
+    }));
 
     const { error: insErr } = await supabase
       .from("day_match_links")
@@ -99,12 +108,30 @@ export default async function handler(req, res) {
       return res.status(500).json({ error: "day_match_links insert failed", details: insErr.message });
     }
 
+    // 7) Vérification anti-faux-positif (on confirme le nombre de rows en base)
+    const { count, error: countErr } = await supabase
+      .from("day_match_links")
+      .select("*", { count: "exact", head: true })
+      .eq("day_id", dayId);
+
+    if (countErr) {
+      return res.status(500).json({ error: "day_match_links verify failed", details: countErr.message });
+    }
+    if ((count || 0) !== rows.length) {
+      return res.status(500).json({
+        error: "day_match_links incomplete",
+        expected: rows.length,
+        got: count || 0,
+      });
+    }
+
+    // 8) OK
     return res.status(200).json({
       ok: true,
       day,
       dayId,
       linkedMatchCount: rows.length,
-      featuredExternalMatchId: feat,
+      featuredExternalMatchId: featuredExternalMatchId,
     });
   } catch (e) {
     return res.status(500).json({ error: "Unhandled server error", details: String(e?.message || e) });
