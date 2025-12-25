@@ -41,6 +41,7 @@ export default async function handler(req, res) {
     .from("days")
     .upsert(
       {
+        sport: "football",
         matchday: md,
         deadline_at: deadlineAt,
         featured_external_match_id: featuredExternalMatchId ?? null,
