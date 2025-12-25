@@ -1,4 +1,4 @@
-import { supabase } from "../../lib/supabase";
+import { supabaseAdmin } from "../../lib/supabaseAdmin";
 
 export default async function handler(req, res) {
   if (req.method !== "POST") {
@@ -15,7 +15,7 @@ export default async function handler(req, res) {
 
   try {
     // 1. Upsert day
-    const { data: day, error: dayError } = await supabase
+    const { data: day, error: dayError } = await supabaseAdmin
       .from("days")
       .upsert(
         {
@@ -36,7 +36,7 @@ export default async function handler(req, res) {
     if (dayError) throw dayError;
 
     // 2. Clean existing matches
-    await supabase.from("day_matches").delete().eq("day_id", day.id);
+    await supabaseAdmin.from("day_matches").delete().eq("day_id", day.id);
 
     // 3. Insert matches
     const rows = matches.map((m) => ({
@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       is_featured: m.externalMatchId === featuredExternalMatchId,
     }));
 
-    const { error: matchError } = await supabase
+    const { error: matchError } = await supabaseAdmin
       .from("day_matches")
       .insert(rows);
 
@@ -62,6 +62,6 @@ export default async function handler(req, res) {
     return res.status(200).json({ dayId: day.id });
   } catch (e) {
     console.error(e);
-    return res.status(500).json({ error: "Failed to save day" });
+    return res.status(500).json({ error: e?.message ?? String(e) });
   }
 }
