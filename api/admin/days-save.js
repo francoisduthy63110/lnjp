@@ -45,6 +45,10 @@ export default async function handler(req, res) {
     const competitionCode = "FL1";
     const title = `Ligue 1 — Journée ${md}`;
 
+    // ✅ created_by obligatoire (NOT NULL en base)
+    // Mets ADMIN_SYSTEM_USER_ID dans Vercel env vars (ex: "admin_system")
+    const createdBy = process.env.ADMIN_SYSTEM_USER_ID || "admin_system";
+
     // 1) Upsert days
     const { data: day, error: dayErr } = await supabase
       .from("days")
@@ -57,6 +61,7 @@ export default async function handler(req, res) {
           deadline_at: deadlineAt,
           featured_external_match_id: featuredExternalMatchId ?? null,
           status: "DRAFT",
+          created_by: createdBy, // ✅ AJOUT
         },
         { onConflict: "competition_code,matchday" }
       )
@@ -68,13 +73,16 @@ export default async function handler(req, res) {
     }
 
     // 2) delete + insert day_matches
+    // ⚠️ suppose que day_matches contient bien matchday + external_match_id
     const { error: delErr } = await supabase
       .from("day_matches")
       .delete()
       .eq("matchday", md);
 
     if (delErr) {
-      return res.status(500).json({ error: "day_matches delete failed", details: delErr.message });
+      return res
+        .status(500)
+        .json({ error: "day_matches delete failed", details: delErr.message });
     }
 
     const rows = matches.map((id) => ({
@@ -82,16 +90,18 @@ export default async function handler(req, res) {
       external_match_id: Number(id),
     }));
 
-    const { error: insErr } = await supabase
-      .from("day_matches")
-      .insert(rows);
+    const { error: insErr } = await supabase.from("day_matches").insert(rows);
 
     if (insErr) {
-      return res.status(500).json({ error: "day_matches insert failed", details: insErr.message });
+      return res
+        .status(500)
+        .json({ error: "day_matches insert failed", details: insErr.message });
     }
 
     return res.status(200).json({ ok: true, day, matchCount: rows.length });
   } catch (e) {
-    return res.status(500).json({ error: "Unhandled server error", details: String(e?.message || e) });
+    return res
+      .status(500)
+      .json({ error: "Unhandled server error", details: String(e?.message || e) });
   }
 }
