@@ -21,87 +21,114 @@ export default async function handler(req, res) {
     if (!supabaseUrl || !serviceKey) {
       return res.status(500).json({ error: "Missing Supabase server env vars" });
     }
-
     const supabase = createClient(supabaseUrl, serviceKey);
 
     const body = req.body || {};
-    const matchday = body.matchday;
+    const md = Number(body.matchday);
     const deadlineAt = body.deadlineAt;
-    const featuredExternalMatchId = body.featuredExternalMatchId;
-    const matches = body.matches;
+    const featuredExternalMatchId =
+      body.featuredExternalMatchId === undefined || body.featuredExternalMatchId === null
+        ? null
+        : Number(body.featuredExternalMatchId);
+    const matchIds = body.matches;
 
-    // validations minimales
-    const md = Number(matchday);
     if (!Number.isInteger(md)) {
       return res.status(400).json({ error: "matchday is required (integer)" });
     }
     if (!deadlineAt || typeof deadlineAt !== "string") {
       return res.status(400).json({ error: "deadlineAt is required (ISO string)" });
     }
-    if (!Array.isArray(matches) || matches.length === 0) {
+    if (!Array.isArray(matchIds) || matchIds.length === 0) {
       return res.status(400).json({ error: "matches is required (non-empty array)" });
     }
 
     const competitionCode = "FL1";
     const title = `Ligue 1 — Journée ${md}`;
-
-    // ✅ created_by obligatoire (NOT NULL en base)
-    // Mets ADMIN_SYSTEM_USER_ID dans Vercel env vars (ex: "admin_system")
     const createdBy = process.env.ADMIN_SYSTEM_USER_ID || "admin_system";
 
-    // 1) Upsert days
+    // 1) Upsert days (clé métier: competition_code + matchday)
+    // NB: on utilise featured_match_external_id (et on ignore l'autre colonne doublon)
     const { data: day, error: dayErr } = await supabase
       .from("days")
       .upsert(
         {
           sport: "football",
           competition_code: competitionCode,
-          title,
           matchday: md,
+          title,
           deadline_at: deadlineAt,
-          featured_external_match_id: featuredExternalMatchId ?? null,
           status: "DRAFT",
-          created_by: createdBy, // ✅ AJOUT
+          created_by: createdBy,
+          featured_match_external_id: featuredExternalMatchId, // ✅ colonne réelle
         },
         { onConflict: "competition_code,matchday" }
       )
-      .select("*")
+      .select("id, sport, competition_code, matchday, title, deadline_at, status, featured_match_external_id")
       .single();
 
     if (dayErr) {
       return res.status(500).json({ error: "days upsert failed", details: dayErr.message });
     }
 
-    // 2) delete + insert day_matches
-    // ⚠️ suppose que day_matches contient bien matchday + external_match_id
-    const { error: delErr } = await supabase
+    const dayId = day.id;
+
+    // 2) Délier les anciens matchs de cette journée (si re-save)
+    // On remet day_id = null et is_featured = false
+    const { error: clearErr } = await supabase
       .from("day_matches")
-      .delete()
-      .eq("matchday", md);
+      .update({ day_id: null, is_featured: false })
+      .eq("day_id", dayId);
 
-    if (delErr) {
-      return res
-        .status(500)
-        .json({ error: "day_matches delete failed", details: delErr.message });
+    if (clearErr) {
+      return res.status(500).json({ error: "day_matches clear failed", details: clearErr.message });
     }
 
-    const rows = matches.map((id) => ({
-      matchday: md,
-      external_match_id: Number(id),
-    }));
-
-    const { error: insErr } = await supabase.from("day_matches").insert(rows);
-
-    if (insErr) {
-      return res
-        .status(500)
-        .json({ error: "day_matches insert failed", details: insErr.message });
+    // 3) Lier les matchs (UPDATE, pas INSERT)
+    const ids = matchIds.map((x) => Number(x)).filter((x) => Number.isFinite(x));
+    if (ids.length === 0) {
+      return res.status(400).json({ error: "matches must contain numeric ids" });
     }
 
-    return res.status(200).json({ ok: true, day, matchCount: rows.length });
+    const { error: linkErr } = await supabase
+      .from("day_matches")
+      .update({ day_id: dayId })
+      .in("external_match_id", ids);
+
+    if (linkErr) {
+      return res.status(500).json({ error: "day_matches link failed", details: linkErr.message });
+    }
+
+    // 4) Gérer le match phare (optionnel)
+    if (featuredExternalMatchId) {
+      // reset puis set à true pour celui-là (sécurise si le featured change)
+      const { error: resetFeatErr } = await supabase
+        .from("day_matches")
+        .update({ is_featured: false })
+        .eq("day_id", dayId);
+
+      if (resetFeatErr) {
+        return res.status(500).json({ error: "day_matches featured reset failed", details: resetFeatErr.message });
+      }
+
+      const { error: setFeatErr } = await supabase
+        .from("day_matches")
+        .update({ is_featured: true })
+        .eq("day_id", dayId)
+        .eq("external_match_id", featuredExternalMatchId);
+
+      if (setFeatErr) {
+        return res.status(500).json({ error: "day_matches featured set failed", details: setFeatErr.message });
+      }
+    }
+
+    return res.status(200).json({
+      ok: true,
+      day,
+      dayId,
+      linkedMatchCount: ids.length,
+      featuredExternalMatchId,
+    });
   } catch (e) {
-    return res
-      .status(500)
-      .json({ error: "Unhandled server error", details: String(e?.message || e) });
+    return res.status(500).json({ error: "Unhandled server error", details: String(e?.message || e) });
   }
 }
