@@ -37,12 +37,14 @@ export default async function handler(req, res) {
   // 1) Upsert dans days (status = DRAFT)
   // Hypothèse de schéma minimal :
   // days: matchday (unique), deadline_at, featured_external_match_id, status
-  const { data: day, error: dayErr } = await supabase
-    .from("days")
+const competitionCode = "FL1";
+const title = `Ligue 1 — Journée ${md}`; // MVP
+
 .upsert(
   {
     sport: "football",
-    competition_code: "FL1",
+    competition_code: competitionCode,
+    title,
     matchday: md,
     deadline_at: deadlineAt,
     featured_external_match_id: featuredExternalMatchId ?? null,
@@ -50,6 +52,7 @@ export default async function handler(req, res) {
   },
   { onConflict: "matchday" }
 )
+
     .select("*")
     .single();
 
