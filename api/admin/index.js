@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
-import { supabaseAdmin } from "../../lib/supabaseAdmin";
+import { supabaseAdmin } from "../../src/lib/supabaseAdmin";
 
 function requireEnv(name) {
   const v = process.env[name];
