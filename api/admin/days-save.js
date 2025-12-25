@@ -40,21 +40,23 @@ export default async function handler(req, res) {
 const competitionCode = "FL1";
 const title = `Ligue 1 — Journée ${md}`; // MVP
 
-.upsert(
-  {
-    sport: "football",
-    competition_code: competitionCode,
-    title,
-    matchday: md,
-    deadline_at: deadlineAt,
-    featured_external_match_id: featuredExternalMatchId ?? null,
-    status: "DRAFT",
-  },
-  { onConflict: "matchday" }
-)
+const { data: day, error: dayErr } = await supabase
+  .from("days")
+  .upsert(
+    {
+      sport: "football",
+      competition_code: competitionCode,
+      title,
+      matchday: md,
+      deadline_at: deadlineAt,
+      featured_external_match_id: featuredExternalMatchId ?? null,
+      status: "DRAFT",
+    },
+    { onConflict: "competition_code,matchday" } // IMPORTANT (voir note ci-dessous)
+  )
+  .select("*")
+  .single();
 
-    .select("*")
-    .single();
 
   if (dayErr) return res.status(500).json({ error: "days upsert failed", details: dayErr.message });
 
