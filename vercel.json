@@ -1,5 +1,14 @@
 {
   "routes": [
+    { "src": "^/api/admin/days-list$", "dest": "/api/admin?action=days-list" },
+    { "src": "^/api/admin/days-save$", "dest": "/api/admin?action=days-save" },
+    { "src": "^/api/admin/football/fl1-upcoming$", "dest": "/api/admin?action=football-fl1-upcoming" },
+
+    { "src": "^/api/admin-notify$", "dest": "/api/admin?action=admin-notify" },
+    { "src": "^/api/admin-chat$", "dest": "/api/admin?action=admin-chat" },
+
+    { "src": "^/api/(.*)$", "dest": "/api/$1" },
+
     { "handle": "filesystem" },
     { "src": "/(.*)", "dest": "/" }
   ]
