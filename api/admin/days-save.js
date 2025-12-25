@@ -39,16 +39,17 @@ export default async function handler(req, res) {
   // days: matchday (unique), deadline_at, featured_external_match_id, status
   const { data: day, error: dayErr } = await supabase
     .from("days")
-    .upsert(
-      {
-        sport: "football",
-        matchday: md,
-        deadline_at: deadlineAt,
-        featured_external_match_id: featuredExternalMatchId ?? null,
-        status: "DRAFT",
-      },
-      { onConflict: "matchday" }
-    )
+.upsert(
+  {
+    sport: "football",
+    competition_code: "FL1",
+    matchday: md,
+    deadline_at: deadlineAt,
+    featured_external_match_id: featuredExternalMatchId ?? null,
+    status: "DRAFT",
+  },
+  { onConflict: "matchday" }
+)
     .select("*")
     .single();
 
