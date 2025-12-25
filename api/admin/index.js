@@ -2,7 +2,7 @@ import fs from "fs";
 import path from "path";
 import webpush from "web-push";
 import { createClient } from "@supabase/supabase-js";
-import { supabaseAdmin } from "../../src/lib/supabaseAdmin.js";
+import { supabaseAdmin } from "../../lib/supabaseAdmin.js";
 
 
 function requireEnv(name) {
