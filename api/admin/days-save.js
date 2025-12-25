@@ -1,110 +1,67 @@
-// api/admin/days-save.js
-import fs from "fs";
-import path from "path";
-
-function readAdminToken(req) {
-  const x = req.headers["x-admin-token"];
-  if (x) return String(x);
-  const auth = req.headers["authorization"] || "";
-  const m = String(auth).match(/^Bearer\s+(.+)$/i);
-  return m ? m[1] : "";
-}
-
-function assertAdmin(req) {
-  const token = readAdminToken(req);
-  const expected = process.env.ADMIN_TOKEN || "lnjp_super_admin_2025_secret_token";
-  if (!token || token !== expected) {
-    const err = new Error("Unauthorized (admin token invalid)");
-    err.statusCode = 401;
-    throw err;
-  }
-}
-
-function storeFile() {
-  return path.join("/tmp", "lnjp_days_store.json");
-}
-
-function safeReadStore() {
-  const f = storeFile();
-  try {
-    if (!fs.existsSync(f)) {
-      return { days: [] };
-    }
-    const raw = fs.readFileSync(f, "utf-8");
-    const json = JSON.parse(raw);
-    if (!json || !Array.isArray(json.days)) return { days: [] };
-    return json;
-  } catch {
-    return { days: [] };
-  }
-}
-
-function safeWriteStore(data) {
-  const f = storeFile();
-  fs.writeFileSync(f, JSON.stringify(data, null, 2), "utf-8");
-}
-
-function upsertDay(store, incoming) {
-  const md = Number(incoming.matchday);
-  const idx = store.days.findIndex((d) => Number(d.matchday) === md);
-
-  const now = new Date().toISOString();
-  const base = {
-    id: idx >= 0 ? store.days[idx].id : `day_${md}`,
-    sport: "football",
-    competition_code: "FL1",
-    matchday: md,
-    title: `Ligue 1 — Journée ${md}`,
-    status: idx >= 0 ? store.days[idx].status : "DRAFT",
-    created_by: "admin_system",
-    created_at: idx >= 0 ? store.days[idx].created_at : now,
-    published_at: idx >= 0 ? store.days[idx].published_at : null,
-  };
-
-  const next = {
-    ...base,
-    deadline_at: incoming.deadlineAt || null,
-    featured_match_external_id: incoming.featuredExternalMatchId ?? null,
-    matches: Array.isArray(incoming.matches) ? incoming.matches.map(Number) : [],
-    updated_at: now,
-  };
-
-  if (idx >= 0) store.days[idx] = next;
-  else store.days.push(next);
-
-  // tri par matchday
-  store.days.sort((a, b) => Number(a.matchday) - Number(b.matchday));
-
-  return next;
-}
+import { supabase } from "../../lib/supabase";
 
 export default async function handler(req, res) {
+  if (req.method !== "POST") {
+    return res.status(405).json({ error: "Method not allowed" });
+  }
+
+  const {
+    matchday,
+    deadlineAt,
+    featuredExternalMatchId,
+    matches,
+    adminId,
+  } = req.body;
+
   try {
-    if (req.method !== "POST") {
-      return res.status(405).json({ ok: false, error: "Method not allowed" });
-    }
+    // 1. Upsert day
+    const { data: day, error: dayError } = await supabase
+      .from("days")
+      .upsert(
+        {
+          sport: "football",
+          competition_code: "FL1",
+          matchday,
+          title: `Ligue 1 — Journée ${matchday}`,
+          deadline_at: deadlineAt,
+          featured_match_external_id: featuredExternalMatchId,
+          status: "DRAFT",
+          created_by: adminId,
+        },
+        { onConflict: "competition_code,matchday" }
+      )
+      .select()
+      .single();
 
-    assertAdmin(req);
+    if (dayError) throw dayError;
 
-    const body = req.body || {};
-    const matchday = Number(body.matchday);
-    if (!Number.isFinite(matchday) || matchday <= 0) {
-      return res.status(400).json({ ok: false, error: "matchday invalid" });
-    }
+    // 2. Clean existing matches
+    await supabase.from("day_matches").delete().eq("day_id", day.id);
 
-    const deadlineAt = body.deadlineAt || null;
-    const featuredExternalMatchId =
-      body.featuredExternalMatchId == null ? null : Number(body.featuredExternalMatchId);
+    // 3. Insert matches
+    const rows = matches.map((m) => ({
+      day_id: day.id,
+      external_match_id: m.externalMatchId,
+      utc_date: m.utcDate,
+      status: m.status,
+      home_team_id: m.homeTeam.id,
+      home_team_name: m.homeTeam.name,
+      home_team_crest: m.homeTeam.crest,
+      away_team_id: m.awayTeam.id,
+      away_team_name: m.awayTeam.name,
+      away_team_crest: m.awayTeam.crest,
+      is_featured: m.externalMatchId === featuredExternalMatchId,
+    }));
 
-    const matches = Array.isArray(body.matches) ? body.matches.map(Number) : [];
+    const { error: matchError } = await supabase
+      .from("day_matches")
+      .insert(rows);
 
-    const store = safeReadStore();
-    const saved = upsertDay(store, { matchday, deadlineAt, featuredExternalMatchId, matches });
-    safeWriteStore(store);
+    if (matchError) throw matchError;
 
-    return res.status(200).json({ ok: true, day: saved });
+    return res.status(200).json({ dayId: day.id });
   } catch (e) {
-    const status = e?.statusCode || 500;
-    return res.status(status).json({ ok: false, error: e?.message || "Server error" });
+    console.error(e);
+    return res.status(500).json({ error: "Failed to save day" });
   }
 }
