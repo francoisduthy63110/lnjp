@@ -23,6 +23,13 @@ async function readJsonBody(req) {
   });
 }
 
+// BDD attend 'X' pour le nul (contrainte predictions_pick_check)
+function normalizePick(v) {
+  const s = String(v || "").toUpperCase();
+  if (s === "N") return "X";
+  return s;
+}
+
 export default async function handler(req, res) {
   try {
     if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
@@ -64,14 +71,12 @@ export default async function handler(req, res) {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
 
-    // 4) Upsert predictions (MVP 1 / N / 2)
-    // Table public.predictions attend:
-    // day_id, league_code, user_id, external_match_id, prediction
+    // 4) Upsert predictions (MVP 1 / N / 2) -> BDD: pick = '1' | 'X' | '2'
     const rows = predictions.map((p) => ({
       day_id: dayId,
       user_id: userId,
       external_match_id: Number(p.externalMatchId),
-      pick: String(p.prediction),
+      pick: normalizePick(p.prediction),
     }));
 
     // Validations basiques
@@ -79,9 +84,9 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: "Invalid externalMatchId" });
     }
 
-if (rows.some((r) => !["1", "N", "2"].includes(r.pick))) {
-  return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
-}
+    if (rows.some((r) => !["1", "X", "2"].includes(r.pick))) {
+      return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
+    }
 
     const { error: upErr } = await supabase
       .from("predictions")
