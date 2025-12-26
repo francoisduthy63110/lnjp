@@ -3,6 +3,7 @@ import { useMemo, useState } from "react";
 export default function Admin() {
   // Token commun à tous les blocs
   const [token, setToken] = useState("");
+  const [leagueCode, setLeagueCode] = useState("LNJP");
 
   // --- Bloc NOTIFS
   const [title, setTitle] = useState("LNJP");
@@ -72,7 +73,7 @@ export default function Admin() {
     setDaysError("");
     setDaysLoading(true);
     try {
-      const r = await fetch("/api/admin/days-list", {
+      const r = await fetch(`/api/admin/days-list?leagueCode=${encodeURIComponent(leagueCode)}`, {
         method: "GET",
         headers: adminHeaders(),
       });
@@ -154,6 +155,13 @@ export default function Admin() {
             value={token}
             onChange={(e) => setToken(e.target.value)}
           />
+
+          <input
+  className="w-full border rounded-lg p-2"
+  placeholder="LEAGUE_CODE"
+  value={leagueCode}
+  onChange={(e) => setLeagueCode(e.target.value)}
+/>
           <input className="w-full border rounded-lg p-2" placeholder="Titre" value={title} onChange={(e) => setTitle(e.target.value)} />
           <textarea className="w-full border rounded-lg p-2" placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} />
           <input className="w-full border rounded-lg p-2" placeholder="URL (optionnel)" value={url} onChange={(e) => setUrl(e.target.value)} />
