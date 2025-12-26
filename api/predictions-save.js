@@ -53,7 +53,7 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: "League mismatch" });
     }
 
-    // 2) Check statut
+    // 2) Check statut (il faut que la journée soit publiée)
     if (String(day.status || "").toUpperCase() !== "PUBLISHED") {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
@@ -64,20 +64,24 @@ export default async function handler(req, res) {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
 
-    // 4) Upsert predictions (1 ligne par match)
-    // On assume une table public.predictions avec colonnes:
-    // day_id, user_id, external_match_id, home, away, created_at/updated_at (optionnels)
+    // 4) Upsert predictions (MVP 1 / N / 2)
+    // Table public.predictions attend:
+    // day_id, league_code, user_id, external_match_id, prediction
     const rows = predictions.map((p) => ({
       day_id: dayId,
+      league_code: leagueCode || day.league_code || "LNJP",
       user_id: userId,
       external_match_id: Number(p.externalMatchId),
-      home: Number(p.home),
-      away: Number(p.away),
+      prediction: String(p.prediction),
     }));
 
-    // Validation basique : IDs valides
+    // Validations basiques
     if (rows.some((r) => !Number.isFinite(r.external_match_id))) {
       return json(res, 400, { ok: false, error: "Invalid externalMatchId" });
+    }
+
+    if (rows.some((r) => !["1", "N", "2"].includes(r.prediction))) {
+      return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
     }
 
     const { error: upErr } = await supabase
