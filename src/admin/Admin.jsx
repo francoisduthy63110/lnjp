@@ -35,7 +35,6 @@ export default function Admin() {
   const [saveResult, setSaveResult] = useState(null);
 
   function adminHeaders() {
-    // Compat: le backend peut lire x-admin-token (comme ton curl) ou Authorization
     return {
       "Content-Type": "application/json",
       "x-admin-token": token,
@@ -63,28 +62,118 @@ export default function Admin() {
     setEditingMatchday(matchday);
 
     const d = days.find((x) => Number(x.matchday) === Number(matchday));
-    setDeadlineLocal(toDatetimeLocalValue(d?.deadline_at || d?.deadlineAt));
-    setFeaturedId(String(d?.featured_match_external_id ?? d?.featuredExternalMatchId ?? d?.featured_external_match_id ?? ""));
-    const raw = d?.matches ?? d?.selectedMatches ?? d?.match_external_ids ?? [];
-    setSelectedMatches(Array.isArray(raw) ? raw.map((x) => Number(x)) : []);
+
+    // si jour déjà publié en BDD, on garde sa deadline/featured
+    setDeadlineLocal(toDatetimeLocalValue(d?.deadline_at || d?.deadlineAt || d?.deadline_at_db || null));
+    setFeaturedId(
+      String(
+        d?.featured_match_external_id ??
+          d?.featuredExternalMatchId ??
+          d?.featured_external_match_id ??
+          ""
+      )
+    );
+
+    // Pré-sélection (si tu ajoutes plus tard un chargement depuis day_matches)
+    setSelectedMatches(Array.isArray(d?.selectedMatches) ? d.selectedMatches.map((x) => Number(x)) : []);
   }
 
+  function toggleMatch(externalId) {
+    const id = Number(externalId);
+    setSelectedMatches((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+  }
+
+  /**
+   * Charge:
+   * 1) les jours déjà publiés en DB (/api/admin/days-list) => status, deadline, featured
+   * 2) les prochains matchs via Football API (/api/admin/football/fl1-upcoming) => matchday + matches[]
+   * Puis merge par matchday:
+   * - si DB existe => status PUBLISHED + deadline + featured
+   * - on garde matches (football) pour cocher et publier
+   */
   async function loadDays() {
     setDaysError("");
     setDaysLoading(true);
     try {
-      const r = await fetch(`/api/admin/days-list?leagueCode=${encodeURIComponent(leagueCode)}`, {
+      // 1) DB days
+      const rDb = await fetch(`/api/admin/days-list?leagueCode=${encodeURIComponent(leagueCode)}`, {
         method: "GET",
         headers: adminHeaders(),
       });
+      const db = await rDb.json().catch(() => ({}));
+      if (!rDb.ok || !db?.ok) {
+        const msg = db?.error || `HTTP ${rDb.status}`;
+        throw new Error(msg);
+      }
+      const dbDays = Array.isArray(db.days) ? db.days : [];
 
-      const data = await r.json().catch(() => ({}));
-      if (!r.ok || !data?.ok) {
-        const msg = data?.error || `HTTP ${r.status}`;
+      // index DB par matchday
+      const dbByMd = new Map();
+      for (const d of dbDays) {
+        dbByMd.set(Number(d.matchday), d);
+      }
+
+      // 2) Upcoming via football API
+      const rUp = await fetch(`/api/admin/football/fl1-upcoming?count=5`, {
+        method: "GET",
+        headers: adminHeaders(),
+      });
+      const up = await rUp.json().catch(() => ({}));
+      if (!rUp.ok || !up?.ok) {
+        const msg = up?.error || `HTTP ${rUp.status}`;
         throw new Error(msg);
       }
 
-      setDays(Array.isArray(data.days) ? data.days : []);
+      // up.days = [{matchday, matches:[...]}, ...]
+      const upcomingDays = Array.isArray(up.days) ? up.days : [];
+
+      // 3) Merge
+      const merged = [];
+
+      for (const d of upcomingDays) {
+        const md = Number(d.matchday);
+        const matches = Array.isArray(d.matches) ? d.matches : [];
+
+        const dbDay = dbByMd.get(md);
+
+        merged.push({
+          // affichage
+          title: dbDay?.title || `Ligue 1 — Journée ${md}`,
+          matchday: md,
+
+          // statut
+          status: dbDay?.status || "DRAFT",
+          deadline_at: dbDay?.deadline_at || null,
+          featured_match_external_id: dbDay?.featured_match_external_id || null,
+
+          // utile pour publish
+          matches, // objets football-data (id, utcDate, homeTeam, awayTeam, status...)
+
+          // pour clé react
+          id: dbDay?.id || `upcoming-${md}`,
+        });
+      }
+
+      // Bonus: si DB contient des journées hors upcoming, on les ajoute à la fin
+      for (const dbDay of dbDays) {
+        const md = Number(dbDay.matchday);
+        const already = merged.some((x) => Number(x.matchday) === md);
+        if (already) continue;
+        merged.push({
+          title: dbDay.title || `Ligue 1 — Journée ${md}`,
+          matchday: md,
+          status: dbDay.status || "PUBLISHED",
+          deadline_at: dbDay.deadline_at || null,
+          featured_match_external_id: dbDay.featured_match_external_id || null,
+          matches: [], // pas de matches connus sans football API
+          id: dbDay.id || `db-${md}`,
+        });
+      }
+
+      // tri par matchday
+      merged.sort((a, b) => Number(a.matchday) - Number(b.matchday));
+
+      setDays(merged);
     } catch (e) {
       setDaysError(e?.message || String(e));
     } finally {
@@ -92,15 +181,15 @@ export default function Admin() {
     }
   }
 
-    async function saveDay() {
+  async function saveDay() {
     if (!editingDay) return;
     setSaveResult(null);
     setSaveBusy(true);
     try {
+      // Ici editingDay.matches vient de football-fl1-upcoming
       const selectedMatchObjects = (editingDay.matches || [])
         .filter((m) => selectedMatches.includes(Number(m.id)))
         .map((m) => ({
-          // format attendu côté backend (compat)
           externalMatchId: Number(m.id),
           utcDate: m.utcDate || null,
           status: m.status || null,
@@ -133,11 +222,6 @@ export default function Admin() {
     } finally {
       setSaveBusy(false);
     }
-  } 
-
-  function toggleMatch(externalId) {
-    const id = Number(externalId);
-    setSelectedMatches((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
   }
 
   return (
@@ -157,14 +241,30 @@ export default function Admin() {
           />
 
           <input
-  className="w-full border rounded-lg p-2"
-  placeholder="LEAGUE_CODE"
-  value={leagueCode}
-  onChange={(e) => setLeagueCode(e.target.value)}
-/>
-          <input className="w-full border rounded-lg p-2" placeholder="Titre" value={title} onChange={(e) => setTitle(e.target.value)} />
-          <textarea className="w-full border rounded-lg p-2" placeholder="Message" value={body} onChange={(e) => setBody(e.target.value)} />
-          <input className="w-full border rounded-lg p-2" placeholder="URL (optionnel)" value={url} onChange={(e) => setUrl(e.target.value)} />
+            className="w-full border rounded-lg p-2"
+            placeholder="LEAGUE_CODE"
+            value={leagueCode}
+            onChange={(e) => setLeagueCode(e.target.value)}
+          />
+
+          <input
+            className="w-full border rounded-lg p-2"
+            placeholder="Titre"
+            value={title}
+            onChange={(e) => setTitle(e.target.value)}
+          />
+          <textarea
+            className="w-full border rounded-lg p-2"
+            placeholder="Message"
+            value={body}
+            onChange={(e) => setBody(e.target.value)}
+          />
+          <input
+            className="w-full border rounded-lg p-2"
+            placeholder="URL (optionnel)"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+          />
 
           <button
             className="w-full rounded-xl bg-slate-900 text-white px-4 py-3 font-semibold hover:bg-slate-800 disabled:opacity-50"
@@ -190,7 +290,11 @@ export default function Admin() {
             {sending ? "Envoi..." : "Envoyer push + Inbox"}
           </button>
 
-          {result && <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">{JSON.stringify(result, null, 2)}</pre>}
+          {result && (
+            <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">
+              {JSON.stringify(result, null, 2)}
+            </pre>
+          )}
         </div>
 
         {/* 2) Messagerie */}
@@ -198,14 +302,12 @@ export default function Admin() {
           <div className="text-lg font-bold">Messagerie — Message dans le salon</div>
           <div className="text-sm text-slate-600">Envoie un message dans le salon unique de la ligue (comme un utilisateur).</div>
 
-          <input
+          <textarea
             className="w-full border rounded-lg p-2"
-            placeholder="ADMIN_TOKEN (MVP)"
-            value={token}
-            onChange={(e) => setToken(e.target.value)}
+            placeholder="Message à publier"
+            value={chatMessage}
+            onChange={(e) => setChatMessage(e.target.value)}
           />
-
-          <textarea className="w-full border rounded-lg p-2" placeholder="Message à publier" value={chatMessage} onChange={(e) => setChatMessage(e.target.value)} />
 
           <button
             className="w-full rounded-xl bg-slate-900 text-white px-4 py-3 font-semibold hover:bg-slate-800 disabled:opacity-50"
@@ -217,7 +319,8 @@ export default function Admin() {
                 const r = await fetch("/api/admin-chat", {
                   method: "POST",
                   headers: adminHeaders(),
-                  body: JSON.stringify({ content: chatMessage }),
+                  // IMPORTANT: backend attend {message: "..."}
+                  body: JSON.stringify({ message: chatMessage }),
                 });
                 const data = await r.json().catch(() => ({}));
                 setChatResult(data);
@@ -231,7 +334,11 @@ export default function Admin() {
             {chatSending ? "Envoi..." : "Envoyer dans la messagerie"}
           </button>
 
-          {chatResult && <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">{JSON.stringify(chatResult, null, 2)}</pre>}
+          {chatResult && (
+            <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">
+              {JSON.stringify(chatResult, null, 2)}
+            </pre>
+          )}
         </div>
 
         {/* 3) Journées */}
@@ -240,8 +347,7 @@ export default function Admin() {
             <div>
               <div className="text-lg font-bold">Journées — workflow (MVP)</div>
               <div className="text-sm text-slate-600">
-                Charger les prochaines journées, sélectionner les matchs, définir la deadline et le match phare, puis enregistrer via{" "}
-                <span className="font-mono">/api/admin/days-save</span>.
+                1) Charger les prochaines journées (Football API) + états DB, 2) sélectionner les matchs, 3) définir deadline + match phare, 4) publier.
               </div>
             </div>
 
@@ -256,7 +362,7 @@ export default function Admin() {
 
           <input
             className="w-full border rounded-lg p-2"
-            placeholder="ADMIN_TOKEN (utilisé pour days-list et days-save)"
+            placeholder="ADMIN_TOKEN (utilisé pour days-list et days-publish)"
             value={token}
             onChange={(e) => setToken(e.target.value)}
           />
@@ -265,13 +371,15 @@ export default function Admin() {
 
           <div className="space-y-3">
             {days.length === 0 ? (
-              <div className="text-sm text-slate-600">Aucune journée chargée. Clique sur <span className="font-semibold">Charger les journées</span>.</div>
+              <div className="text-sm text-slate-600">
+                Aucune journée chargée. Clique sur <span className="font-semibold">Charger les journées</span>.
+              </div>
             ) : (
               days.map((d) => {
                 const md = Number(d.matchday);
                 const status = d.status || "—";
                 const title = d.title || `Journée ${md}`;
-                const deadline = d.deadline_at || d.deadlineAt || null;
+                const deadline = d.deadline_at || null;
                 const isEditing = Number(editingMatchday) === md;
 
                 return (
@@ -297,31 +405,50 @@ export default function Admin() {
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                           <label className="block space-y-1">
                             <span className="text-sm font-medium">Deadline</span>
-                            <input type="datetime-local" className="w-full border rounded-lg p-2" value={deadlineLocal} onChange={(e) => setDeadlineLocal(e.target.value)} />
+                            <input
+                              type="datetime-local"
+                              className="w-full border rounded-lg p-2"
+                              value={deadlineLocal}
+                              onChange={(e) => setDeadlineLocal(e.target.value)}
+                            />
                           </label>
 
                           <label className="block space-y-1">
                             <span className="text-sm font-medium">Match phare (externalMatchId)</span>
-                            <input className="w-full border rounded-lg p-2" value={featuredId} onChange={(e) => setFeaturedId(e.target.value)} placeholder="ex: 123" inputMode="numeric" />
+                            <input
+                              className="w-full border rounded-lg p-2"
+                              value={featuredId}
+                              onChange={(e) => setFeaturedId(e.target.value)}
+                              placeholder="ex: 123"
+                              inputMode="numeric"
+                            />
                           </label>
                         </div>
 
                         <div className="space-y-2">
                           <div className="text-sm font-medium">Matchs proposés aux paris</div>
 
-                          {Array.isArray(d.matches_details) && d.matches_details.length > 0 ? (
+                          {Array.isArray(d.matches) && d.matches.length > 0 ? (
                             <div className="space-y-2">
-                              {d.matches_details.map((m) => {
-                                const mid = Number(m.externalMatchId ?? m.id ?? m.external_id);
-                                const label = m.label || m.name || `${m.homeTeam ?? m.home ?? "Home"} - ${m.awayTeam ?? m.away ?? "Away"}`;
+                              {d.matches.map((m) => {
+                                const mid = Number(m.id);
+                                const home = m.homeTeam?.name || "Home";
+                                const away = m.awayTeam?.name || "Away";
+                                const when = m.utcDate ? new Date(m.utcDate).toLocaleString("fr-FR") : "";
                                 const checked = selectedMatches.includes(mid);
 
                                 return (
                                   <label key={String(mid)} className="flex items-center gap-3 border rounded-lg p-2">
                                     <input type="checkbox" checked={checked} onChange={() => toggleMatch(mid)} />
                                     <div className="flex-1">
-                                      <div className="text-sm">{label}</div>
-                                      <div className="text-xs text-slate-500 font-mono">externalId: {mid}</div>
+                                      <div className="text-sm">
+                                        {home} <span className="text-slate-400">vs</span> {away}
+                                      </div>
+                                      <div className="text-xs text-slate-500 font-mono">
+                                        externalId: {mid}
+                                        {when ? ` — ${when}` : ""}
+                                        {m.status ? ` — ${m.status}` : ""}
+                                      </div>
                                     </div>
                                   </label>
                                 );
@@ -329,7 +456,7 @@ export default function Admin() {
                             </div>
                           ) : (
                             <div className="text-sm text-slate-600">
-                              matches_details n’est pas renvoyé par l’API (c’est OK pour l’instant).
+                              Aucun match chargé pour cette journée (reclique “Charger les journées”).
                             </div>
                           )}
                         </div>
@@ -339,8 +466,9 @@ export default function Admin() {
                             className="flex-1 rounded-xl bg-slate-900 text-white px-4 py-3 font-semibold hover:bg-slate-800 disabled:opacity-50"
                             disabled={saveBusy}
                             onClick={saveDay}
+                            title={selectedMatches.length === 0 ? "Sélectionne au moins 1 match" : "Publier la journée"}
                           >
-                            {saveBusy ? "Enregistrement..." : "Enregistrer (day-save)"}
+                            {saveBusy ? "Publication..." : "Publier (days-publish)"}
                           </button>
 
                           <button className="rounded-xl border px-4 py-3 font-semibold hover:bg-slate-50" onClick={() => setEditingMatchday(null)}>
@@ -348,7 +476,11 @@ export default function Admin() {
                           </button>
                         </div>
 
-                        {saveResult && <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">{JSON.stringify(saveResult, null, 2)}</pre>}
+                        {saveResult && (
+                          <pre className="text-xs bg-slate-50 border rounded-lg p-3 overflow-auto">
+                            {JSON.stringify(saveResult, null, 2)}
+                          </pre>
+                        )}
                       </div>
                     )}
                   </div>
