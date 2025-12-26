@@ -132,7 +132,7 @@ export default function Admin() {
     } finally {
       setSaveBusy(false);
     }
-  }
+  } 
 
   function toggleMatch(externalId) {
     const id = Number(externalId);
