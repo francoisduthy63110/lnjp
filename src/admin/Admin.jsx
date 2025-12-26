@@ -3,7 +3,7 @@ import { useMemo, useState } from "react";
 export default function Admin() {
   // Token commun à tous les blocs
   const [token, setToken] = useState("");
-  const [leagueCode, setLeagueCode] = useState("LNJP");
+  const [leagueCode, setLeagueCode] = useState("LNJP2025");
 
   // --- Bloc NOTIFS
   const [title, setTitle] = useState("LNJP");
