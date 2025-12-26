@@ -71,7 +71,7 @@ export default async function handler(req, res) {
       day_id: dayId,
       user_id: userId,
       external_match_id: Number(p.externalMatchId),
-      prediction: String(p.prediction),
+      pick: String(p.prediction),
     }));
 
     // Validations basiques
@@ -79,9 +79,9 @@ export default async function handler(req, res) {
       return json(res, 400, { ok: false, error: "Invalid externalMatchId" });
     }
 
-    if (rows.some((r) => !["1", "N", "2"].includes(r.prediction))) {
-      return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
-    }
+if (rows.some((r) => !["1", "N", "2"].includes(r.pick))) {
+  return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
+}
 
     const { error: upErr } = await supabase
       .from("predictions")
