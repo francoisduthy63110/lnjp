@@ -272,29 +272,29 @@ async function handleDaysPublish(req, res) {
   // upsert day
   const title = `Ligue 1 — Journée ${matchday}`;
 
-  const { data: day, error: upErr } = await supabaseAdmin
-    .from("days")
-    .upsert(
-      [
-        {
-          id: existing?.id,
-          league_code: leagueCode,
-          sport: "football",
-          competition_code: "FL1",
-          matchday,
-          title,
-          deadline_at: deadlineAt,
-          featured_match_external_id: featuredExternalMatchId,
-          status: "PUBLISHED",
-          published_at: new Date().toISOString(),
-          created_by: "admin_system",
-          updated_at: new Date().toISOString(),
-        },
-      ],
-      { onConflict: "league_code,competition_code,matchday" }
-    )
-    .select("*")
-    .single();
+// upsert day (IMPORTANT: ne pas envoyer "id" en création)
+const dayRow = {
+  league_code: leagueCode,
+  sport: "football",
+  competition_code: "FL1",
+  matchday,
+  title,
+  deadline_at: deadlineAt,
+  featured_match_external_id: featuredExternalMatchId,
+  status: "PUBLISHED",
+  published_at: new Date().toISOString(),
+  created_by: "admin_system",
+  updated_at: new Date().toISOString(),
+};
+
+if (existing?.id) dayRow.id = existing.id; // uniquement en update
+
+const { data: day, error: upErr } = await supabaseAdmin
+  .from("days")
+  .upsert([dayRow], { onConflict: "league_code,competition_code,matchday" })
+  .select("*")
+  .single();
+
 
   if (upErr) return json(res, 500, { ok: false, error: upErr.message || String(upErr) });
 
