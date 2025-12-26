@@ -23,16 +23,20 @@ async function readJsonBody(req) {
   });
 }
 
-// BDD attend 'X' pour le nul (contrainte predictions_pick_check)
-function normalizePick(v) {
-  const s = String(v || "").toUpperCase();
-  if (s === "N") return "X";
+// LNJP MVP: prediction doit être '1' | 'N' | '2'
+function normalizePrediction(v) {
+  const s = String(v ?? "").trim().toUpperCase();
+  if (!["1", "N", "2"].includes(s)) {
+    throw new Error("Invalid prediction (expected 1, N or 2)");
+  }
   return s;
 }
 
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
+    if (req.method !== "POST") {
+      return json(res, 405, { ok: false, error: "Method not allowed" });
+    }
 
     const body = await readJsonBody(req);
 
@@ -71,22 +75,17 @@ export default async function handler(req, res) {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
 
-    // 4) Upsert predictions (MVP 1 / N / 2) -> BDD: pick = '1' | 'X' | '2'
-const rows = predictions.map((p) => ({
-  day_id: dayId,
-  user_id: userId,
-  external_match_id: Number(p.externalMatchId),
-  prediction: String(p.prediction).toUpperCase(), // '1'|'N'|'2'
-}));
-
+    // 4) Upsert predictions (LNJP: '1'|'N'|'2' dans la colonne predictions.prediction)
+    const rows = predictions.map((p) => ({
+      day_id: dayId,
+      user_id: userId,
+      external_match_id: Number(p.externalMatchId),
+      prediction: normalizePrediction(p.prediction),
+    }));
 
     // Validations basiques
     if (rows.some((r) => !Number.isFinite(r.external_match_id))) {
       return json(res, 400, { ok: false, error: "Invalid externalMatchId" });
-    }
-
-    if (rows.some((r) => !["1", "X", "2"].includes(r.pick))) {
-      return json(res, 400, { ok: false, error: "Invalid prediction (expected 1, N or 2)" });
     }
 
     const { error: upErr } = await supabase
@@ -97,6 +96,6 @@ const rows = predictions.map((p) => ({
 
     return json(res, 200, { ok: true, saved: rows.length });
   } catch (e) {
-    return json(res, 500, { ok: false, error: e?.message || String(e) });
+    return json(res, 400, { ok: false, error: e?.message || String(e) });
   }
 }
