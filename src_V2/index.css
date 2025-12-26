@@ -1,0 +1,19 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* Design tokens (charte graphique)
+   - ces variables servent de source de vérité pour l'UI V2 (et pourront ensuite être branchées sur l'app principale)
+*/
+@import "./theme/tokens.css";
+
+@layer base {
+  html, body {
+    height: 100%;
+  }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+  }
+}
