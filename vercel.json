@@ -14,6 +14,6 @@
     { "src": "^/api/(.*)$", "dest": "/api/$1" },
 
     { "handle": "filesystem" },
-    { "src": "/(.*)", "dest": "/" }
+    { "src": "/(.*)", "dest": "/index.html" }
   ]
 }
