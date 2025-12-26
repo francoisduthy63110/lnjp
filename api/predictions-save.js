@@ -23,20 +23,9 @@ async function readJsonBody(req) {
   });
 }
 
-// LNJP MVP: prediction doit être '1' | 'N' | '2'
-function normalizePrediction(v) {
-  const s = String(v ?? "").trim().toUpperCase();
-  if (!["1", "N", "2"].includes(s)) {
-    throw new Error("Invalid prediction (expected 1, N or 2)");
-  }
-  return s;
-}
-
 export default async function handler(req, res) {
   try {
-    if (req.method !== "POST") {
-      return json(res, 405, { ok: false, error: "Method not allowed" });
-    }
+    if (req.method !== "POST") return json(res, 405, { ok: false, error: "Method not allowed" });
 
     const body = await readJsonBody(req);
 
@@ -59,34 +48,57 @@ export default async function handler(req, res) {
     if (dayErr) return json(res, 500, { ok: false, error: dayErr.message || String(dayErr) });
     if (!day) return json(res, 404, { ok: false, error: "Day not found" });
 
-    // optionnel : cohérence ligue
     if (leagueCode && day.league_code && leagueCode !== day.league_code) {
       return json(res, 400, { ok: false, error: "League mismatch" });
     }
 
-    // 2) Check statut (il faut que la journée soit publiée)
     if (String(day.status || "").toUpperCase() !== "PUBLISHED") {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
 
-    // 3) Check deadline
     const deadline = day.deadline_at ? new Date(day.deadline_at).getTime() : null;
     if (deadline && Date.now() > deadline) {
       return json(res, 403, { ok: false, error: "Predictions closed" });
     }
 
-    // 4) Upsert predictions (LNJP: '1'|'N'|'2' dans la colonne predictions.prediction)
-    const rows = predictions.map((p) => ({
-      day_id: dayId,
-      user_id: userId,
-      external_match_id: Number(p.externalMatchId),
-      prediction: normalizePrediction(p.prediction),
-    }));
+    // 2) Contrôle "pronos complets" = must match day_matches
+    const { data: matches, error: mErr } = await supabase
+      .from("day_matches")
+      .select("external_match_id")
+      .eq("day_id", dayId);
 
-    // Validations basiques
-    if (rows.some((r) => !Number.isFinite(r.external_match_id))) {
-      return json(res, 400, { ok: false, error: "Invalid externalMatchId" });
+    if (mErr) return json(res, 500, { ok: false, error: mErr.message || String(mErr) });
+
+    const expectedIds = new Set((matches || []).map((m) => Number(m.external_match_id)));
+    if (expectedIds.size === 0) return json(res, 400, { ok: false, error: "Day has no matches" });
+
+    const providedIds = new Set(predictions.map((p) => Number(p.externalMatchId)));
+    if (providedIds.size !== expectedIds.size) {
+      return json(res, 400, { ok: false, error: "Predictions must cover all matches" });
     }
+
+    for (const id of expectedIds) {
+      if (!providedIds.has(id)) {
+        return json(res, 400, { ok: false, error: "Predictions must cover all matches" });
+      }
+    }
+
+    // 3) Upsert
+    const rows = predictions.map((p) => {
+      const externalMatchId = Number(p.externalMatchId);
+      const prediction = String(p.prediction || "").trim().toUpperCase();
+
+      if (!Number.isFinite(externalMatchId) || externalMatchId <= 0) throw new Error("Invalid externalMatchId");
+      if (!["1", "N", "2"].includes(prediction)) throw new Error("Invalid prediction value");
+
+      return {
+        day_id: dayId,
+        user_id: String(userId),
+        external_match_id: externalMatchId,
+        prediction,
+        updated_at: new Date().toISOString(),
+      };
+    });
 
     const { error: upErr } = await supabase
       .from("predictions")

@@ -91,32 +91,42 @@ export default function Admin() {
     }
   }
 
-  async function saveDay() {
+    async function saveDay() {
     if (!editingDay) return;
     setSaveResult(null);
     setSaveBusy(true);
     try {
+      const selectedMatchObjects = (editingDay.matches || [])
+        .filter((m) => selectedMatches.includes(Number(m.id)))
+        .map((m) => ({
+          // format attendu côté backend (compat)
+          externalMatchId: Number(m.id),
+          utcDate: m.utcDate || null,
+          status: m.status || null,
+          homeTeam: m.homeTeam || null,
+          awayTeam: m.awayTeam || null,
+        }));
+
       const payload = {
+        leagueCode,
         matchday: Number(editingDay.matchday),
         deadlineAt: datetimeLocalToISO(deadlineLocal),
         featuredExternalMatchId: featuredId ? Number(featuredId) : null,
-        matches: selectedMatches.map((x) => Number(x)),
+        matches: selectedMatchObjects,
       };
 
-      const r = await fetch("/api/admin/days-save", {
+      const r = await fetch("/api/admin/days-publish", {
         method: "POST",
         headers: adminHeaders(),
         body: JSON.stringify(payload),
       });
 
       const data = await r.json().catch(() => ({}));
-      if (!r.ok || !data?.ok) {
-        const msg = data?.error || `HTTP ${r.status}`;
-        throw new Error(msg);
-      }
+      setSaveResult(data);
 
-      setSaveResult({ ok: true, payload, response: data });
-      await loadDays();
+      if (r.ok && data?.ok) {
+        await loadDays();
+      }
     } catch (e) {
       setSaveResult({ ok: false, error: e?.message || String(e) });
     } finally {
