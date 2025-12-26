@@ -72,12 +72,13 @@ export default async function handler(req, res) {
     }
 
     // 4) Upsert predictions (MVP 1 / N / 2) -> BDD: pick = '1' | 'X' | '2'
-    const rows = predictions.map((p) => ({
-      day_id: dayId,
-      user_id: userId,
-      external_match_id: Number(p.externalMatchId),
-      pick: normalizePick(p.prediction),
-    }));
+const rows = predictions.map((p) => ({
+  day_id: dayId,
+  user_id: userId,
+  external_match_id: Number(p.externalMatchId),
+  prediction: String(p.prediction).toUpperCase(), // '1'|'N'|'2'
+}));
+
 
     // Validations basiques
     if (rows.some((r) => !Number.isFinite(r.external_match_id))) {
