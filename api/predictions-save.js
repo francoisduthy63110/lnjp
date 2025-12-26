@@ -69,7 +69,6 @@ export default async function handler(req, res) {
     // day_id, league_code, user_id, external_match_id, prediction
     const rows = predictions.map((p) => ({
       day_id: dayId,
-      league_code: leagueCode || day.league_code || "LNJP",
       user_id: userId,
       external_match_id: Number(p.externalMatchId),
       prediction: String(p.prediction),
