@@ -219,12 +219,13 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
   const predicted = days.filter((d) => d.complete);
 
   return (
-    <div className="min-h-screen bg-white text-slate-900">
-      <div className="flex">
+    // Le fond global est géré par index.css (body). Ici, on évite bg-white.
+    <div className="min-h-screen">
+      <div className="flex min-h-screen gap-4 p-4">
         {/* Sidebar */}
-        <div className="w-64 border-r min-h-screen p-4">
-          <div className="text-2xl font-extrabold">LNJP</div>
-          <div className="text-xs text-slate-600 mt-1">
+        <div className="w-72 shrink-0 lnjp-surface rounded-3xl p-4">
+          <div className="text-2xl font-extrabold tracking-tight">LNJP</div>
+          <div className="text-xs lnjp-muted mt-1">
             {displayName} — Ligue {leagueCode}
           </div>
 
@@ -240,35 +241,49 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
             </SideItem>
           </div>
 
-          <div className="mt-8 pt-4 border-t">
-            <button className="w-full rounded-xl border px-3 py-2 text-sm" onClick={onSignOut}>
+          <div className="mt-8 pt-4 border-t border-white/10">
+            <button
+              className="w-full rounded-2xl px-3 py-2 text-sm lnjp-chip text-[var(--lnjp-text)] hover:bg-white/10"
+              onClick={onSignOut}
+            >
               Quitter
             </button>
           </div>
         </div>
 
         {/* Main */}
-        <div className="flex-1 p-6">
+        <div className="flex-1">
           {active === "days" && (
             <div className="space-y-4">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className="text-2xl font-extrabold">Journées</div>
-                  <div className="text-sm text-slate-600">À pronostiquer / pronostiquées.</div>
+              <div className="lnjp-surface rounded-3xl p-5">
+                <div className="flex items-start justify-between gap-3">
+                  <div>
+                    <div className="text-2xl font-extrabold tracking-tight">Journées</div>
+                    <div className="text-sm lnjp-muted">À pronostiquer / pronostiquées.</div>
+                  </div>
+
+                  <button
+                    className="rounded-2xl px-3 py-2 text-sm lnjp-chip text-[var(--lnjp-text)] hover:bg-white/10 disabled:opacity-60"
+                    onClick={loadDays}
+                    disabled={daysBusy}
+                  >
+                    {daysBusy ? "Chargement..." : "Rafraîchir"}
+                  </button>
                 </div>
-                <button className="rounded-xl border px-3 py-2 text-sm" onClick={loadDays} disabled={daysBusy}>
-                  {daysBusy ? "Chargement..." : "Rafraîchir"}
-                </button>
+
+                {daysError ? (
+                  <div className="text-sm mt-3" style={{ color: "var(--lnjp-red)" }}>
+                    {daysError}
+                  </div>
+                ) : null}
               </div>
 
-              {daysError ? <div className="text-sm text-red-600">{daysError}</div> : null}
-
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-                <div className="rounded-2xl border p-4">
+                <div className="lnjp-surface rounded-3xl p-4">
                   <div className="font-bold">À pronostiquer</div>
                   <div className="mt-3 space-y-2">
                     {toPredict.length === 0 ? (
-                      <div className="text-sm text-slate-600">Rien à faire.</div>
+                      <div className="text-sm lnjp-muted">Rien à faire.</div>
                     ) : (
                       toPredict.map((d) => (
                         <DayRow key={d.id} d={d} active={d.id === selectedDayId} onClick={() => setSelectedDayId(d.id)} />
@@ -277,11 +292,11 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
                   </div>
                 </div>
 
-                <div className="rounded-2xl border p-4">
+                <div className="lnjp-surface rounded-3xl p-4">
                   <div className="font-bold">Pronostiquées</div>
                   <div className="mt-3 space-y-2">
                     {predicted.length === 0 ? (
-                      <div className="text-sm text-slate-600">Aucune journée terminée.</div>
+                      <div className="text-sm lnjp-muted">Aucune journée terminée.</div>
                     ) : (
                       predicted.map((d) => (
                         <DayRow key={d.id} d={d} active={d.id === selectedDayId} onClick={() => setSelectedDayId(d.id)} />
@@ -293,23 +308,32 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
 
               {/* Day details */}
               {selectedDayId ? (
-                <div className="rounded-2xl border p-4 space-y-3">
+                <div className="lnjp-surface rounded-3xl p-5 space-y-3">
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <div className="text-lg font-bold">{dayData?.day?.title || "Journée"}</div>
-                      <div className="text-sm text-slate-600">
+                      <div className="text-sm lnjp-muted">
                         Deadline{" "}
                         {dayData?.day?.deadline_at ? new Date(dayData.day.deadline_at).toLocaleString("fr-FR") : "—"}
                       </div>
                     </div>
 
                     {dayIsAlreadyComplete && !editing ? (
-                      <button className="rounded-xl border px-3 py-2 text-sm font-semibold" onClick={() => setEditing(true)}>
+                      <button
+                        className="rounded-2xl px-3 py-2 text-sm font-semibold lnjp-chip text-[var(--lnjp-text)] hover:bg-white/10"
+                        onClick={() => setEditing(true)}
+                      >
                         Modifier mes pronos
                       </button>
                     ) : (
                       <button
-                        className="rounded-xl bg-slate-900 text-white px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                        className="rounded-2xl px-4 py-2 text-sm font-semibold disabled:opacity-50"
+                        style={{
+                          background: "linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06))",
+                          border: "1px solid rgba(255,255,255,.16)",
+                          boxShadow: "0 12px 28px rgba(0,0,0,.35)",
+                          color: "var(--lnjp-text)",
+                        }}
                         onClick={savePredictions}
                         disabled={saveBusy || dayBusy || !isComplete}
                         title={!isComplete ? "Complète tous les matchs" : "Valider"}
@@ -319,7 +343,11 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
                     )}
                   </div>
 
-                  {dayError ? <div className="text-sm text-red-600">{dayError}</div> : null}
+                  {dayError ? (
+                    <div className="text-sm" style={{ color: "var(--lnjp-red)" }}>
+                      {dayError}
+                    </div>
+                  ) : null}
 
                   <div className="space-y-2">
                     {matches.map((m) => {
@@ -332,17 +360,17 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
                       const readOnly = dayIsAlreadyComplete && !editing;
 
                       return (
-                        <div key={id} className="rounded-2xl border p-3">
+                        <div key={id} className="rounded-3xl lnjp-chip p-3">
                           <div className="flex items-start justify-between gap-3">
                             <div>
                               <div className="font-semibold">
-                                {home} <span className="text-slate-400">vs</span> {away}
+                                {home} <span className="opacity-70">vs</span> {away}
                               </div>
-                              <div className="text-xs text-slate-500">{when}</div>
+                              <div className="text-xs lnjp-muted">{when}</div>
                             </div>
 
                             {readOnly ? (
-                              <div className="text-sm font-bold rounded-xl border px-4 py-2 bg-slate-50">
+                              <div className="text-sm font-bold rounded-2xl lnjp-chip px-4 py-2">
                                 Prono: {v || "—"}
                               </div>
                             ) : (
@@ -365,12 +393,14 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
                   </div>
 
                   {!isComplete && (!dayIsAlreadyComplete || editing) ? (
-                    <div className="text-sm text-slate-700">Il manque des choix pour valider.</div>
+                    <div className="text-sm lnjp-muted">Il manque des choix pour valider.</div>
                   ) : null}
 
                   {saveResult ? (
-                    <div className={`text-sm ${saveResult.ok ? "text-green-700" : "text-red-700"}`}>
-                      {saveResult.ok ? `OK — ${saveResult.saved || 0} prono(s) enregistré(s).` : `Erreur — ${saveResult.error || "Impossible."}`}
+                    <div className="text-sm" style={{ color: saveResult.ok ? "rgba(140, 230, 170, .95)" : "var(--lnjp-red)" }}>
+                      {saveResult.ok
+                        ? `OK — ${saveResult.saved || 0} prono(s) enregistré(s).`
+                        : `Erreur — ${saveResult.error || "Impossible."}`}
                     </div>
                   ) : null}
                 </div>
@@ -378,7 +408,9 @@ export default function PlayerHome({ displayName, leagueCode, userId, onSignOut 
             </div>
           )}
 
-          {active === "chat" && <ChatRoom leagueCode={leagueCode} userId={userId} displayName={displayName} onUnreadCountChange={setChatUnread} />}
+          {active === "chat" && (
+            <ChatRoom leagueCode={leagueCode} userId={userId} displayName={displayName} onUnreadCountChange={setChatUnread} />
+          )}
 
           {active === "notif" && <NotificationsPanel userId={userId} />}
         </div>
@@ -391,14 +423,17 @@ function SideItem({ active, onClick, badge, children }) {
   return (
     <button
       className={[
-        "w-full text-left rounded-xl px-3 py-2 font-semibold border",
-        active ? "bg-slate-900 text-white border-slate-900" : "bg-white hover:bg-slate-50",
+        "w-full text-left rounded-2xl px-3 py-2 font-semibold",
+        active ? "lnjp-chip bg-white/12 border border-white/20" : "lnjp-chip border border-white/10 hover:bg-white/10",
       ].join(" ")}
       onClick={onClick}
     >
-      {children}
+      <span className="text-[var(--lnjp-text)]">{children}</span>
       {badge ? (
-        <span className="ml-2 inline-flex items-center justify-center rounded-full bg-red-600 text-white text-xs px-2">
+        <span
+          className="ml-2 inline-flex items-center justify-center rounded-full text-white text-xs px-2"
+          style={{ background: "var(--lnjp-red)" }}
+        >
           {badge}
         </span>
       ) : null}
@@ -411,12 +446,12 @@ function DayRow({ d, active, onClick }) {
     <button
       onClick={onClick}
       className={[
-        "w-full text-left rounded-xl border p-3",
-        active ? "bg-slate-900 text-white border-slate-900" : "bg-white hover:bg-slate-50",
+        "w-full text-left rounded-2xl px-3 py-3 border",
+        active ? "bg-white/12 border-white/20" : "bg-white/5 border-white/10 hover:bg-white/8",
       ].join(" ")}
     >
-      <div className="font-semibold">{d.title}</div>
-      <div className="text-xs opacity-80">
+      <div className="font-semibold text-[var(--lnjp-text)]">{d.title}</div>
+      <div className="text-xs lnjp-muted">
         Matchday {d.matchday} — {d.predCount}/{d.matchCount}
       </div>
     </button>
@@ -427,8 +462,8 @@ function PickButton({ active, onClick, children }) {
   return (
     <button
       className={[
-        "w-10 h-10 rounded-xl border font-extrabold",
-        active ? "bg-slate-900 text-white border-slate-900" : "bg-white hover:bg-slate-50",
+        "w-10 h-10 rounded-2xl border font-extrabold",
+        active ? "bg-white/18 border-white/25 text-[var(--lnjp-text)]" : "bg-white/6 border-white/12 text-[var(--lnjp-text)] hover:bg-white/10",
       ].join(" ")}
       onClick={onClick}
       type="button"
@@ -518,58 +553,72 @@ function ChatRoom({ leagueCode, userId, displayName, onUnreadCountChange }) {
   }
 
   return (
-    <div className="rounded-2xl border p-4">
+    <div className="lnjp-surface rounded-3xl p-5">
       <div className="flex items-center justify-between">
         <div>
           <div className="text-lg font-bold">Messagerie</div>
-          <div className="text-sm text-slate-600">Salon unique de la ligue</div>
+          <div className="text-sm lnjp-muted">Salon unique de la ligue</div>
         </div>
-        <button className="rounded-xl border px-3 py-2 text-sm" onClick={load} disabled={busy}>
+        <button
+          className="rounded-2xl px-3 py-2 text-sm lnjp-chip text-[var(--lnjp-text)] hover:bg-white/10 disabled:opacity-60"
+          onClick={load}
+          disabled={busy}
+        >
           Rafraîchir
         </button>
       </div>
 
-      {error ? <div className="text-sm text-red-600 mt-3">{error}</div> : null}
+      {error ? (
+        <div className="text-sm mt-3" style={{ color: "var(--lnjp-red)" }}>
+          {error}
+        </div>
+      ) : null}
 
-      <div className="mt-4 h-[55vh] overflow-auto border rounded-2xl p-3 bg-slate-50">
+      <div className="mt-4 h-[55vh] overflow-auto rounded-3xl lnjp-chip p-3">
         {busy ? (
-          <div className="text-sm text-slate-600">Chargement…</div>
+          <div className="text-sm lnjp-muted">Chargement…</div>
         ) : messages.length ? (
           <div className="space-y-2">
             {messages.map((m) => (
               <div key={m.id} className="text-sm">
-                <div className="text-xs text-slate-500">
-                  <span className="font-semibold text-slate-700">{m.displayName || m.userId}</span> —{" "}
+                <div className="text-xs lnjp-muted">
+                  <span className="font-semibold text-[var(--lnjp-text)]">{m.displayName || m.userId}</span> —{" "}
                   {m.createdAt ? new Date(m.createdAt).toLocaleString("fr-FR") : ""}
                 </div>
-                <div className="whitespace-pre-wrap">{m.content}</div>
+                <div className="whitespace-pre-wrap text-[var(--lnjp-text)]">{m.content}</div>
               </div>
             ))}
             <div ref={bottomRef} />
           </div>
         ) : (
-          <div className="text-sm text-slate-600">Aucun message.</div>
+          <div className="text-sm lnjp-muted">Aucun message.</div>
         )}
       </div>
 
       <div className="mt-3">
         <div className="flex gap-2">
           <textarea
-            className="flex-1 border rounded-2xl p-3 h-14 resize-none"
+            className="flex-1 rounded-3xl px-4 py-3 h-14 resize-none outline-none lnjp-chip text-[var(--lnjp-text)] placeholder:text-[rgba(233,238,246,.55)]"
             placeholder="Ton message…"
             value={text}
             onChange={(e) => setText(e.target.value)}
             onKeyDown={onKeyDown}
           />
           <button
-            className="rounded-xl bg-slate-900 text-white px-4 font-semibold disabled:opacity-50"
+            className="rounded-2xl px-4 font-semibold disabled:opacity-50"
+            style={{
+              background: "linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06))",
+              border: "1px solid rgba(255,255,255,.16)",
+              boxShadow: "0 12px 28px rgba(0,0,0,.35)",
+              color: "var(--lnjp-text)",
+            }}
             onClick={send}
             disabled={text.trim().length === 0}
           >
             Envoyer
           </button>
         </div>
-        <div className="text-xs text-slate-500 mt-2">Entrée pour envoyer. (Shift+Entrée pour sauter une ligne)</div>
+        <div className="text-xs lnjp-muted mt-2">Entrée pour envoyer. (Shift+Entrée pour sauter une ligne)</div>
       </div>
     </div>
   );
