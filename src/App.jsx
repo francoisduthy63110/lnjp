@@ -8,20 +8,9 @@ import V2App from "./v2/V2App";
 import StyleLab from "./stylelab/StyleLab";
 
 function canAccessPreview() {
-  // En dev: OK
-  if (import.meta.env.DEV) return true;
-
-  // En prod: uniquement si ?preview=1
-  try {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("preview") === "1") return true;
-  } catch {}
-
-  // Option: activer via localStorage (pratique sur mobile)
-  if (typeof window !== "undefined" && window.localStorage?.getItem("lnjp_preview") === "1") return true;
-
-  return false;
+  return true
 }
+
 
 /**
  * App.jsx (MVP clean)
