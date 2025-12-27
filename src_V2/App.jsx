@@ -2,52 +2,54 @@ import { useMemo, useState } from "react";
 import Admin from "./admin/Admin";
 import PlayerHome from "./components/PlayerHome";
 import { getIdentity, setIdentity, clearIdentity } from "./lib/user";
-
-// UI V2 sandbox
-import V2App from "./v2/V2App";
 import StyleLab from "./stylelab/StyleLab";
-
-function canAccessPreview() {
-  // En dev: OK
-  if (import.meta.env.DEV) return true;
-
-  // En prod: uniquement si ?preview=1
-  try {
-    const url = new URL(window.location.href);
-    if (url.searchParams.get("preview") === "1") return true;
-  } catch {}
-
-  // Option: activer via localStorage (pratique sur mobile)
-  if (typeof window !== "undefined" && window.localStorage?.getItem("lnjp_preview") === "1") return true;
-
-  return false;
-}
+import V2App from "./v2/V2App";
 
 /**
  * App.jsx (MVP clean)
  * - /admin => Admin
- * - /v2 et /stylelab => UI sandbox (protégé en prod)
  * - sinon => Join (Pseudo + Code ligue)
- * - identité stockée en localStorage
+ * - aucune Auth email / Supabase Auth
+ * - identité stockée en localStorage pour:
+ *   - messagerie (API server)
+ *   - inbox notifications (userId en querystring)
  */
 export default function App() {
-  const path = useMemo(() => window.location.pathname, []);
+  const pathname = useMemo(() => window.location.pathname || "/", []);
 
-  // Admin en priorité
-  if (path.startsWith("/admin")) return <Admin />;
+  // 1) Admin (doit rester prioritaire)
+  const isAdminRoute = useMemo(() => pathname.startsWith("/admin"), [pathname]);
+  if (isAdminRoute) return <Admin />;
 
-  // UI V2 sandbox (protégée en prod)
-  if (path.startsWith("/v2")) {
-    if (!canAccessPreview()) return <LockedPreview />;
+  // 2) UI/UX sandbox (StyleLab + V2)
+  //    - accessible en DEV
+  //    - accessible en PROD uniquement si ?preview=1 (ou localStorage 'lnjp_preview' = '1')
+  const isSandboxRoute = useMemo(() => pathname.startsWith("/stylelab") || pathname.startsWith("/v2"), [pathname]);
+  if (isSandboxRoute) {
+    const url = new URL(window.location.href);
+    const canPreview =
+      import.meta.env.DEV ||
+      url.searchParams.get("preview") === "1" ||
+      window.localStorage.getItem("lnjp_preview") === "1";
+
+    if (!canPreview) {
+      return (
+        <div className="min-h-screen bg-slate-950 text-slate-100 flex items-center justify-center p-6">
+          <div className="max-w-md w-full rounded-2xl border border-white/10 bg-white/5 p-6 space-y-3">
+            <div className="text-lg font-semibold">Preview indisponible</div>
+            <div className="text-sm text-slate-300 leading-relaxed">
+              Cette zone (StyleLab / V2) est désactivée en production.
+            </div>
+            <div className="text-xs text-slate-400">Astuce : ajoute <span className="font-mono">?preview=1</span> à l’URL.</div>
+          </div>
+        </div>
+      );
+    }
+
+    if (pathname.startsWith("/stylelab")) return <StyleLab />;
     return <V2App />;
   }
 
-  if (path.startsWith("/stylelab")) {
-    if (!canAccessPreview()) return <LockedPreview />;
-    return <StyleLab />;
-  }
-
-  // ----- App Joueur actuelle (inchangée)
   const [identity, setIdentityState] = useState(() => getIdentity());
 
   function onJoin({ displayName, leagueCode }) {
@@ -74,28 +76,10 @@ export default function App() {
   );
 }
 
-function LockedPreview() {
-  return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-white border rounded-2xl shadow-sm p-6 space-y-3">
-        <div className="text-lg font-bold">Preview non accessible</div>
-        <div className="text-sm text-slate-600">
-          Cette zone est accessible en local, ou en production avec <span className="font-mono">?preview=1</span>.
-        </div>
-        <div className="text-xs text-slate-500">
-          Option mobile : ouvre la console et exécute{" "}
-          <span className="font-mono">localStorage.setItem("lnjp_preview","1")</span>
-        </div>
-        <a className="text-sm text-blue-700 underline" href="/">
-          Retour à l’app
-        </a>
-      </div>
-    </div>
-  );
-}
-
 /* =========================
    JOIN (1 écran)
+   - pseudo + code ligue
+   - validation via /api/league-validate (server)
 ========================= */
 
 function Join({ onJoin }) {

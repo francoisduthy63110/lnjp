@@ -1,0 +1,45 @@
+:root {
+  /* ===== Core surfaces ===== */
+  --bg: #06080c;           /* quasi noir */
+  --surface: #0b1220;      /* dark bleu/noir */
+  --surface-2: #0f1a2e;    /* hover / sections */
+  --surface-3: #111f37;    /* accent surface */
+
+  /* ===== Text ===== */
+  --text: #ffffff;
+  --muted: #a9b4c7;
+  --muted-2: #7f8aa0;
+
+  /* ===== Brand (logo) ===== */
+  --primary: #0a2a5a;      /* bleu nuit */
+  --primary-2: #2b6cb0;    /* bleu accent (traînée) */
+  --primary-3: #4aa3ff;    /* bleu clair (reflet) */
+
+  /* ===== Lines / borders ===== */
+  --outline: rgba(255, 255, 255, 0.10);
+  --outline-2: rgba(255, 255, 255, 0.16);
+
+  /* ===== Status ===== */
+  --danger: #ef4444;       /* badges notif */
+  --success: #22c55e;      /* flèche up */
+  --warning: #f59e0b;
+
+  /* ===== Radius ===== */
+  --r-md: 14px;
+  --r-lg: 16px;
+  --r-xl: 22px;
+
+  /* ===== Shadows ===== */
+  --shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* Utilitaires globaux très légers (pas de "design system" caché) */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* Pour les zones fixes en bas sur iOS (safe area) */
+:root {
+  --safe-bottom: env(safe-area-inset-bottom);
+  --safe-top: env(safe-area-inset-top);
+}
