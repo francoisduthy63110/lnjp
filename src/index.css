@@ -6,8 +6,8 @@
    LNJP Theme (Navy / Metal)
    ========================= */
 :root{
-  --lnjp-bg-0:#05070c;     /* quasi noir */
-  --lnjp-bg-1:#0a1020;     /* navy sombre mais lisible */
+  --lnjp-bg-0:#05070c;
+  --lnjp-bg-1:#0a1020;
   --lnjp-card-0: rgba(255,255,255,.08);
   --lnjp-card-1: rgba(255,255,255,.03);
   --lnjp-stroke: rgba(255,255,255,.12);
@@ -17,6 +17,7 @@
 
   --lnjp-red:#c8102e;
 }
+
 
 html, body {
   height: 100%;
