@@ -1,3 +1,31 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+/* =========================
+   Global (PWA / iOS safe-area)
+========================= */
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  height: 100%;
+  background: var(--bg);
+}
+
+body {
+  margin: 0;
+}
+
+#root {
+  min-height: 100%;
+  background: var(--bg);
+}
+
+/* Pour éviter le “blanc” pendant les scroll bounce iOS */
+* {
+  -webkit-tap-highlight-color: transparent;
+}
