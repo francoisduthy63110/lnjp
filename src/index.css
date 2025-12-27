@@ -3,29 +3,49 @@
 @tailwind utilities;
 
 /* =========================
-   Global (PWA / iOS safe-area)
-========================= */
+   LNJP Theme (Navy / Metal)
+   ========================= */
+:root{
+  --lnjp-bg-0:#05070c;     /* quasi noir */
+  --lnjp-bg-1:#0a1020;     /* navy sombre mais lisible */
+  --lnjp-card-0: rgba(255,255,255,.08);
+  --lnjp-card-1: rgba(255,255,255,.03);
+  --lnjp-stroke: rgba(255,255,255,.12);
 
-:root {
-  color-scheme: dark;
+  --lnjp-text: #e9eef6;
+  --lnjp-muted:#a8b4c8;
+
+  --lnjp-red:#c8102e;
 }
 
-html,
-body {
+html, body {
   height: 100%;
-  background: var(--bg);
 }
 
-body {
-  margin: 0;
+body{
+  /* Fond plus "clair" que noir pur, avec halos subtils */
+  background:
+    radial-gradient(1100px 700px at 20% 0%, rgba(60,130,255,.14), transparent 60%),
+    radial-gradient(900px 600px at 80% 18%, rgba(190,200,255,.10), transparent 55%),
+    linear-gradient(180deg, var(--lnjp-bg-1) 0%, var(--lnjp-bg-0) 100%);
+  color: var(--lnjp-text);
 }
 
-#root {
-  min-height: 100%;
-  background: var(--bg);
+/* Cartes / blocs */
+.lnjp-surface{
+  background: linear-gradient(180deg, var(--lnjp-card-0), var(--lnjp-card-1));
+  border: 1px solid var(--lnjp-stroke);
+  box-shadow: 0 16px 40px rgba(0,0,0,.35);
+  backdrop-filter: blur(10px);
 }
 
-/* Pour éviter le “blanc” pendant les scroll bounce iOS */
-* {
-  -webkit-tap-highlight-color: transparent;
+/* Chips / petits boutons */
+.lnjp-chip{
+  background: rgba(255,255,255,.06);
+  border: 1px solid rgba(255,255,255,.12);
+}
+
+/* Texte secondaire “métallisé” */
+.lnjp-muted{
+  color: var(--lnjp-muted);
 }

@@ -8,9 +8,8 @@ import V2App from "./v2/V2App";
 import StyleLab from "./stylelab/StyleLab";
 
 function canAccessPreview() {
-  return true
+  return true;
 }
-
 
 /**
  * App.jsx (MVP clean)
@@ -104,7 +103,9 @@ function Join({ onJoin }) {
     setError("");
     setBusy(true);
     try {
-      const res = await fetch("/api/league-validate", {
+      const API_BASE = import.meta.env.DEV ? "https://lnjp.vercel.app" : "";
+const res = await fetch(`${API_BASE}/api/league-validate`, {
+
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ leagueCode: leagueCode.trim() }),
@@ -124,11 +125,13 @@ function Join({ onJoin }) {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 text-slate-900 flex items-center justify-center p-6">
-      <div className="w-full max-w-md bg-white border rounded-2xl shadow-sm p-6 space-y-4">
+    // Le fond global est porté par index.css (body). Ici on ne met plus bg-slate-50.
+    <div className="min-h-screen flex items-center justify-center px-6 py-10">
+      {/* Carte “glass” pour plus de clarté tout en restant dark */}
+      <div className="w-full max-w-md lnjp-surface rounded-3xl p-6 space-y-5">
         <div className="space-y-1">
-          <h1 className="text-2xl font-bold">LNJP</h1>
-          <p className="text-sm text-slate-600">
+          <h1 className="text-2xl font-bold tracking-tight">LNJP</h1>
+          <p className="text-sm lnjp-muted">
             Entre ton pseudo et le code d’invitation de la ligue.
           </p>
         </div>
@@ -137,7 +140,7 @@ function Join({ onJoin }) {
           <label className="block space-y-1">
             <span className="text-sm font-medium">Pseudo</span>
             <input
-              className="w-full border rounded-xl p-3"
+              className="w-full rounded-2xl px-4 py-3 outline-none lnjp-chip text-[var(--lnjp-text)] placeholder:text-[rgba(233,238,246,.55)]"
               value={displayName}
               onChange={(e) => setDisplayName(e.target.value)}
               placeholder="ex: Joueur 1"
@@ -149,7 +152,7 @@ function Join({ onJoin }) {
           <label className="block space-y-1">
             <span className="text-sm font-medium">Code ligue (carton)</span>
             <input
-              className="w-full border rounded-xl p-3 tracking-widest"
+              className="w-full rounded-2xl px-4 py-3 tracking-widest outline-none lnjp-chip text-[var(--lnjp-text)] placeholder:text-[rgba(233,238,246,.55)]"
               value={leagueCode}
               onChange={(e) => setLeagueCode(e.target.value)}
               placeholder="ex: LNJP2025"
@@ -159,7 +162,12 @@ function Join({ onJoin }) {
           </label>
 
           <button
-            className="w-full rounded-xl bg-slate-900 text-white py-3 font-semibold disabled:opacity-50"
+            className="w-full rounded-2xl py-3 font-semibold disabled:opacity-50"
+            style={{
+              background: "linear-gradient(180deg, rgba(255,255,255,.14), rgba(255,255,255,.06))",
+              border: "1px solid rgba(255,255,255,.16)",
+              boxShadow: "0 12px 28px rgba(0,0,0,.35)",
+            }}
             onClick={submit}
             disabled={!canSubmit || busy}
           >
@@ -167,9 +175,13 @@ function Join({ onJoin }) {
           </button>
         </div>
 
-        {error ? <div className="text-sm text-red-600">{error}</div> : null}
+        {error ? (
+          <div className="text-sm" style={{ color: "var(--lnjp-red)" }}>
+            {error}
+          </div>
+        ) : null}
 
-        <div className="text-xs text-slate-500 leading-relaxed">
+        <div className="text-xs lnjp-muted leading-relaxed">
           MVP : pas d’e-mail, pas de mot de passe. Accès via code d’invitation uniquement.
         </div>
       </div>
